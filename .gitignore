@@ -1,0 +1,27 @@
+# Panvara
+# .gitignore    2026-07-14
+#
+# @link    : https://github.com/shezw/panvara
+# @author  : shezw
+# @email   : hello@shezw.com
+
+.agent/
+
+# Go
+/bin/
+/dist/
+*.out
+coverage*.txt
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# Local runtime data
+/.data/
