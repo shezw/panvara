@@ -25,6 +25,7 @@
 | PostgreSQL | 18.4 | Compose 固定 patch 版本；生产支持矩阵在接入数据库时再冻结 |
 | Docker/Compose | 条件必需 | Lite/快速测试不需要；本地 Server 与必需集成测试需要，除非提供 PostgreSQL 18.4 URL |
 | Make | 推荐 | 统一人和 CI 的入口，不隐藏实际 Go 命令 |
+| Node.js | 22+，仅文档 | VitePress 文档预览与构建；不进入 Go Runtime |
 | IDE | 任意支持 gopls 的编辑器 | 保存时 gofmt，开启静态诊断 |
 
 go.mod 同时声明最低 Go 1.25.0 和建议 toolchain go1.26.5。开发与主 CI 使用当前 patch；兼容 CI 使用 Go 1.25.12 并设置 GOTOOLCHAIN=local，防止自动切回新工具链。
@@ -56,8 +57,11 @@ Valkey、NATS、MinIO 和 OpenTelemetry Collector 只有在对应 Port/Adapter �
 
 ## 3. 首次启动 Lite
 
-    git clone https://github.com/shezw/panvara.git
+alpha.2 合并到默认分支前，从验收分支克隆；合并后可以省略 `--branch`：
+
+    git clone --branch codex/alpha2-model-runtime --single-branch https://github.com/shezw/panvara.git
     cd panvara
+    make doctor
     make verify
     make run
 
@@ -71,14 +75,15 @@ Valkey、NATS、MinIO 和 OpenTelemetry Collector 只有在对应 Port/Adapter �
 
 ## 4. 启动 alpha.2 Server
 
-先启动本机 PostgreSQL，并显式导出非敏感示例配置：
+先检查工具、创建本地配置并显式加载。`make local-init` 不会覆盖已有文件：
 
+    make doctor-server
+    make local-init
+    set -a; . ./.env; . ./.env.local; set +a
     make infra-up
-    set -a; . ./.env.example; set +a
 
-再单独生成管理员 Token，并只通过环境变量传入：
+再启动 Server：
 
-    export PANVARA_ADMIN_TOKEN="$(openssl rand -hex 32)"
     make run-server
 
 不要在示例、配置文件、模块 Source、Git 或 `--admin-token` 参数中保存真实 Token；命令行参数通常对同机进程可见。生产环境应由 Secret Manager 注入。alpha.2 要求 Token 至少 32 字节；`BootstrapAdminAuth` 验证器只保存 SHA-256 摘要，但环境变量与启动配置中的明文生命周期不作清除保证。
@@ -96,13 +101,15 @@ Valkey、NATS、MinIO 和 OpenTelemetry Collector 只有在对应 Port/Adapter �
 Compose 端口只绑定 127.0.0.1，开发密码只用于本机；生产配置不得复用。
 PostgreSQL 18 官方镜像把持久化根目录改为 /var/lib/postgresql，Compose 已按 18+ 规则挂载，不能沿用 17 及以下的 /var/lib/postgresql/data。
 
-Panvara 不隐式加载 `.env`。需要覆盖默认值时，通过 Shell、IDE 或可信的环境管理器显式导出 `.env.example` 中的变量；该文件故意不给管理员 Token 设置可用默认值。
+Panvara 不隐式加载 `.env`。需要覆盖默认值时，通过 Shell、IDE 或可信的环境管理器显式导出 `.env` 与 `.env.local`；仓库中的 `.env.example` 故意不给管理员 Token 设置可用默认值。
 多个 clone/worktree 并行开发时，为 PANVARA_COMPOSE_PROJECT 和 PANVARA_POSTGRES_PORT 设置不同值，避免共用容器、数据卷或宿主端口。
 
 ## 5. 统一命令
 
 | 命令 | 用途 |
 | --- | --- |
+| make doctor / doctor-server | 检查 Lite / Server 的本地工具和 Docker 状态 |
+| make local-init | 创建 Git 忽略的 `.env` 与 `.env.local`，不覆盖已有配置 |
 | make fmt | 格式化 Go |
 | make fmt-check | 检查未格式化文件，不修改工作区 |
 | make test | 随机顺序运行单元和 seed corpus |
@@ -116,6 +123,9 @@ Panvara 不隐式加载 `.env`。需要覆盖默认值时，通过 Shell、IDE �
 | make run | 运行 Lite |
 | make run-server | 从进程环境运行 Server；Token 不转换为 CLI 参数 |
 | make infra-up/down | 管理本地 PostgreSQL |
+| make docs-setup | 使用 package-lock 安装文档依赖 |
+| make docs-serve | 在 127.0.0.1:5173 本地预览文档 |
+| make docs-check | 验证模块文档契约并构建静态站点 |
 
 单元测试命令始终使用 `./...`，避免新包因未加入手工列表而逃逸门禁。集成测试使用 `integration` build tag，保持 Go 1.25 兼容任务与默认快速回路不依赖 Docker。
 
@@ -143,6 +153,7 @@ alpha.2 的实际配置优先级是：CLI > 环境变量 > 内置默认值，尚
 
 当前 GitHub Actions 包含：
 
+- Node.js 22：模块文档契约检查与 VitePress 静态构建。
 - Go 1.26.5：fmt-check、vet、unit、race、build。
 - PostgreSQL 18.4：独立 required Job 执行 `make test-e2e`；使用 Service URL，并设置 `PANVARA_REQUIRE_DOCKER=1`，测试不得 Skip。
 - Go 1.25.12：vet、unit、build，且禁止工具链自动升级；不启动 Service、不执行 integration tag。
@@ -167,3 +178,9 @@ alpha.2 的实际配置优先级是：CLI > 环境变量 > 内置默认值，尚
 - OpenTelemetry Collector：跨进程 trace 需要端到端验证。
 
 生产部署建议最终提供容器镜像和 Helm/Kustomize 示例，但 Core v0.1 的开发闭环不依赖 Kubernetes。
+
+## 9. 文档同步约束
+
+任何用户可感知的模块、配置、CLI、API、模型、运行方式或兼容行为变化，都必须在同一变更中更新对应 `docs/modules/` 指南。新模块还要登记 `docs/_meta/modules.json`，并提供非专业用户可执行的验收步骤。
+
+完整 Definition of Done、模块模板和豁免条件见[文档同步规范](contributing/documentation.md)。没有可执行引导和验收步骤的功能，不视为完成。

@@ -14,64 +14,79 @@
 
 # Panvara
 
-Panvara 是面向中小开发团队的、数据模型驱动的可组合全栈框架。它希望用同一套 Core 构建 App、Website、管理后台和 E-commerce，并通过可替换的全球化 Provider 接入身份、支付、消息、存储与其他第三方能力。
+Panvara 是面向中小开发团队的、数据模型驱动的可组合全栈框架。它希望用同一套 Core 构建 App、Website、管理后台和 E-commerce，并通过可替换 Provider 接入全球身份、支付、消息和存储能力。
 
-当前版本是 **v0.1.0-alpha.2**：仓库已经形成“模块声明 → Canonical IR → OpenAPI/Manager Schema → PostgreSQL CRUD → HTTP API”的最小纵向闭环，仍是实验版本，不宣称具备生产级业务能力。
+当前版本是 **v0.1.0-alpha.2**，已经形成“模型声明 → 编译与接口描述 → PostgreSQL CRUD → HTTP API”的最小闭环。它适合本地开发和架构验收，暂不适合直接承载生产业务。
 
 ## 快速开始
 
-开发环境使用 Go 1.26.5；模块最低兼容 Go 1.25。
+第一次使用，请从[使用与验收 Guideline](docs/getting-started/index.md)开始。它按非专业技术人员视角说明安装、编译、本地环境、API 操作、预期结果和故障恢复。
 
-    make verify
-    make run
+只验收不依赖数据库的 Lite：
 
-`make verify` 是不启动 Docker 的快速回路。Lite 默认监听 `127.0.0.1:8080`：
+```sh
+make doctor
+make build
+make run
+```
 
-- `GET /healthz`：进程存活。
-- `GET /readyz`：Core 是否可服务。
-- `GET /version`：独立版本轴。
+另一个终端检查：
 
-运行 alpha.2 Server：
+```sh
+curl -fsS http://127.0.0.1:8080/healthz
+curl -fsS http://127.0.0.1:8080/readyz
+curl -fsS http://127.0.0.1:8080/version
+```
 
-    make infra-up
-    set -a; . ./.env.example; set +a
-    export PANVARA_ADMIN_TOKEN="$(openssl rand -hex 32)"
-    make run-server
+验收 PostgreSQL 和 CRM Leads 完整链路：
 
-Panvara 不自动读取 `.env`；示例文件只提供非敏感配置。管理员 Token 只建议通过环境变量或 Secret Manager 注入，不要写入模块、配置文件、命令行参数或 Git。
+```sh
+make doctor-server
+make local-init
+set -a; . ./.env; . ./.env.local; set +a
+make infra-up
+make run-server
+```
 
-Server 启动时直接编译 [`examples/modules/crm-leads.yaml`](examples/modules/crm-leads.yaml)，自动执行 PostgreSQL migration，并提供：
+完整的创建组织、创建线索、查询和重启持久化步骤见 [CRM Leads 完整验收](docs/getting-started/crm-leads-acceptance.md)。
 
-- `POST /api/public/v1alpha1/crm.leads/lead`：匿名创建 Lead。
-- `/api/admin/v1alpha1/crm.leads/{resource}`：Bearer Token 保护的管理 CRUD 与等值过滤。
-- `/api/core/v1alpha1/modules/crm.leads/openapi.json`：生成的 OpenAPI。
-- `/api/core/v1alpha1/modules/crm.leads/ui-schema.json`：生成的 Manager UI Schema。
+## 当前可以验收
 
-Manager UI Schema 只是前端可消费的描述，alpha.2 尚未包含可视化 Manager 应用。当前也不支持动态排序、模块发布/激活/回滚、Outbox、Provider 或 Worker；这些属于 alpha.3 及后续阶段。
+- 严格 YAML/JSON AppModule 和稳定的模型版本指纹。
+- 11 种字段类型、校验、唯一值、引用、等值过滤和软删除。
+- PostgreSQL 18.4 持久化与 Server 重启恢复。
+- Public Create 与 Bearer Token 保护的 Admin CRUD。
+- 生成的 OpenAPI 3.1 与 Manager UI Schema。
+- Lite 与 Server 两种运行方式。
 
-> alpha.2 持久化风险：Server 每次启动都会从 Source 重新计算 Revision。任何 Canonical IR 变化都会形成全新的空数据命名空间；旧 Revision 的 Record、唯一值和引用完整保留，但不会自动迁移或重绑定。只有切回完全相同的 Source/Hash 才会重新访问旧命名空间。alpha.3 发布/迁移能力完成前，持久化环境必须保存不可变 Source + Hash 并备份数据库；覆盖 Source 不是升级。
+Manager UI Schema 只是前端可消费的描述，尚未包含可视化 Manager。模块在线发布/回滚、完整身份、Provider、支付、Outbox、Worker 和分布式管理也仍在后续阶段。
 
-需要验证真实 PostgreSQL 18.4 与 Server HTTP 持久化链路时：
+> alpha.2 数据提醒：修改模型会形成新的独立数据空间。旧数据仍保留，但不会自动迁移到新模型。请保存原模型和版本指纹，修改前备份数据库；覆盖模型文件不等于升级。
 
-    make test-e2e
+## 文档站
 
-该命令需要可用 Docker，或通过 `PANVARA_TEST_DATABASE_URL` 指向 PostgreSQL 18.4；不满足条件会失败，不会跳过。
+文档源是普通 Markdown，使用 VitePress 1.x 稳定版提供本地搜索、响应式导航、暗色模式和 Mermaid。维护文档需要 Node.js 22+：
 
-## 设计文档
+```sh
+make docs-setup
+make docs-serve
+```
 
-- [总体架构](docs/arch.md)
+打开 `http://127.0.0.1:5173`。提交前执行 `make docs-check`。
+
+项目约束：任何用户可感知模块的变化都必须在同一变更中更新对应引导文档；没有可执行引导和验收步骤的功能不视为完成。详见[文档同步规范](docs/contributing/documentation.md)。
+
+## 文档入口
+
+- [使用与验收 Guideline](docs/getting-started/index.md)
+- [模块指南](docs/modules/index.md)
+- [命令参考](docs/reference/commands.md)
+- [配置参考](docs/reference/configuration.md)
+- [文档同步规范](docs/contributing/documentation.md)
 - [开发环境](docs/development.md)
-- [Core v0 版本与边界](docs/core-v0.md)
+- [总体架构](docs/arch.md)
 - [验证测试框架](docs/testing.md)
-
-## 当前原则
-
-- Core 默认以单进程模块化单体启动，也允许按 Profile 组合和部署。
-- alpha.2 已实现 Lite 与 Server；Manager、Site、Commerce 和 Distributed Profile 仍会 fail-fast。
-- 业务模型、应用编排、接口与基础设施遵循单向依赖。
-- Lite 不要求外部服务；Server 只要求 PostgreSQL，不要求 Valkey、NATS、MinIO 或 Kubernetes。
-- 模块和 Provider 使用显式协议版本；分发版本不替代协议兼容性。
-- 动态模型只能表达受控数据和动作，不允许任意代码、SQL 或 Shell。
+- [Core v0 版本与边界](docs/core-v0.md)
 
 ## License
 

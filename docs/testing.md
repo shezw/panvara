@@ -33,6 +33,7 @@
 | Profile/E2E | Lite/Server 纵向闭环 | 真实 listener + PostgreSQL 18.4 | alpha.2 Server HTTP 持久化 smoke 已建立；发布 E2E 待 alpha.3 |
 | Non-functional | race、benchmark、load、fault | Go race/bench + 专项压测 | 基础 race 已建立 |
 | Supply chain | 漏洞、SBOM、许可、签名 | govulncheck、生成/验证工具 | RC 前 |
+| Documentation | 模块指南、内部链接、静态站点、Golden Path | manifest contract、VitePress build、人工/E2E 复核 | alpha.2 已建立基础门禁 |
 
 测试替身只能替代应用 Port；数据库语义、消息确认和 Provider 协议不可仅靠 Mock 宣称通过。
 
@@ -52,6 +53,8 @@ Docker-free 的 `make verify` 依次验证：
 2. `make test-server-smoke` 验证模块 Artifact、Public Create、Admin CRUD/过滤、ETag、真实 listener、进程重装配后的 Record 持久化。
 
 该 Job 同时设置 `PANVARA_TEST_DATABASE_URL` 与 `PANVARA_REQUIRE_DOCKER=1`；数据库不可用或版本不是 18.4 时必须失败，不能 Skip。Go 1.25.12 兼容 Job 只运行 vet、无 tag 的 unit 和 build，设置 `GOTOOLCHAIN=local`，不需要 Docker。
+
+独立 Documentation Job 使用 Node.js 22 执行 `make docs-setup` 和 `make docs-check`，验证基础页面、模块清单、必需章节、示例 AppModule 映射、内部链接和静态构建。文字与命令的真实性仍由模块 E2E 和非专业用户 Golden Path 复核，不能只凭页面成功渲染判定。
 
 本地 `make test-integration`/`make test-server-smoke` 也设置 `PANVARA_REQUIRE_DOCKER=1`：没有外部测试 URL且 Docker 不可用时会失败。默认 `make test` 与 `make verify` 不包含 integration tag，不会隐式启动 Docker。
 

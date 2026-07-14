@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "id": "appmodule",
+      "name": "AppModule",
+      "status": "alpha.2",
+      "sourcePaths": [
+        "internal/spec/appmodule",
+        "internal/domain/appmodule",
+        "internal/application/appmodule"
+      ],
+      "guide": "docs/modules/appmodule.md",
+      "acceptance": ["make test", "make docs-check"]
+    },
+    {
+      "id": "record-runtime",
+      "name": "Record Runtime",
+      "status": "alpha.2",
+      "sourcePaths": [
+        "internal/application/record",
+        "internal/infrastructure/postgres",
+        "db/migrations"
+      ],
+      "guide": "docs/modules/record-runtime.md",
+      "acceptance": ["make test-integration"]
+    },
+    {
+      "id": "http-api",
+      "name": "HTTP API",
+      "status": "alpha.2",
+      "sourcePaths": [
+        "internal/interfaces/httpapi",
+        "internal/interfaces/httpserver"
+      ],
+      "guide": "docs/modules/http-api.md",
+      "acceptance": ["make test-server-smoke"]
+    },
+    {
+      "id": "runtime-profiles",
+      "name": "Runtime Profiles",
+      "status": "alpha.2",
+      "sourcePaths": [
+        "cmd/panvara",
+        "internal/bootstrap/profile",
+        "internal/runtime/kernel"
+      ],
+      "guide": "docs/modules/runtime-profiles.md",
+      "acceptance": ["make verify"]
+    },
+    {
+      "id": "project-context",
+      "name": "Project Context",
+      "status": "alpha.2",
+      "sourcePaths": [
+        "internal/domain/project",
+        "internal/domain/actor",
+        "internal/domain/value"
+      ],
+      "guide": "docs/modules/project-context.md",
+      "acceptance": ["make test"]
+    },
+    {
+      "id": "crm-leads",
+      "name": "CRM Leads Example",
+      "status": "alpha.2",
+      "sourcePaths": ["examples/modules/crm-leads.yaml"],
+      "guide": "docs/modules/crm-leads.md",
+      "acceptance": ["make test-server-smoke"]
+    }
+  ],
+  "appModuleSources": ["examples/modules/crm-leads.yaml"]
+}

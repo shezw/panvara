@@ -7,14 +7,18 @@
 
 GO ?= go
 GOFMT ?= gofmt
+NPM ?= npm
 BINARY := bin/panvara
 GO_PACKAGES := ./...
 GO_FILES := $(shell find . -type f -name '*.go' -not -path './.git/*')
 
-.PHONY: help fmt fmt-check test test-race test-integration test-server-smoke test-e2e vet build verify run run-server infra-up infra-down clean
+.PHONY: help doctor doctor-server local-init fmt fmt-check test test-race test-integration test-server-smoke test-e2e vet build verify run run-server infra-up infra-down docs-setup docs-serve docs-build docs-check clean
 
 help:
 	@echo "Panvara development commands"
+	@echo "  make doctor            Check tools required by Lite"
+	@echo "  make doctor-server     Check tools required by Server"
+	@echo "  make local-init        Create ignored local configuration and token"
 	@echo "  make run               Run the Lite profile"
 	@echo "  make run-server        Run Server from exported PANVARA_* variables"
 	@echo "  make verify            Run the Docker-free pull-request gate"
@@ -23,6 +27,18 @@ help:
 	@echo "  make test-e2e          Run all required alpha.2 integration tests"
 	@echo "  make infra-up          Start local PostgreSQL"
 	@echo "  make infra-down        Stop local PostgreSQL"
+	@echo "  make docs-setup        Install locked documentation dependencies"
+	@echo "  make docs-serve        Preview documentation on 127.0.0.1:5173"
+	@echo "  make docs-check        Validate guides and build documentation"
+
+doctor:
+	sh scripts/doctor.sh lite
+
+doctor-server:
+	sh scripts/doctor.sh server
+
+local-init:
+	sh scripts/local-init.sh
 
 fmt:
 	$(GOFMT) -w $(GO_FILES)
@@ -66,5 +82,17 @@ infra-up:
 infra-down:
 	docker compose -f deploy/compose/compose.yaml down
 
+docs-setup:
+	$(NPM) ci
+
+docs-serve:
+	$(NPM) run docs:dev
+
+docs-build:
+	$(NPM) run docs:build
+
+docs-check:
+	$(NPM) run docs:check
+
 clean:
-	rm -rf bin
+	rm -rf bin docs/.vitepress/cache docs/.vitepress/dist

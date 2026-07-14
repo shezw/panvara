@@ -13,6 +13,11 @@
 *.out
 coverage*.txt
 
+# Documentation toolchain
+/node_modules/
+/docs/.vitepress/cache/
+/docs/.vitepress/dist/
+
 # Local environment
 .env
 .env.*

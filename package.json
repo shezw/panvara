@@ -1,0 +1,25 @@
+{
+  "name": "panvara-docs",
+  "private": true,
+  "version": "0.1.0-alpha.2",
+  "type": "module",
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "docs:dev": "vitepress dev docs --host 127.0.0.1",
+    "docs:build": "vitepress build docs",
+    "docs:lint": "node scripts/check-docs.mjs",
+    "docs:check": "npm run docs:lint && npm run docs:build"
+  },
+  "devDependencies": {
+    "debug": "4.4.3",
+    "mermaid": "11.16.0",
+    "vitepress": "1.6.4",
+    "vitepress-plugin-mermaid": "2.0.17"
+  },
+  "overrides": {
+    "vite": "6.4.3"
+  }
+}
