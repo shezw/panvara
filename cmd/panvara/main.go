@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -52,14 +53,15 @@ func execute(
 	stdout io.Writer,
 	getenv func(string) string,
 ) error {
-	return executeWithServerFactory(
+	return executeWithFactories(
 		ctx,
 		args,
 		stdout,
 		getenv,
-		func(address string, status httpserver.StatusSource, info buildinfo.Info) runtimeServer {
-			return httpserver.New(address, status, info)
+		func(address string, status httpserver.StatusSource, info buildinfo.Info, handler http.Handler) runtimeServer {
+			return httpserver.NewWithHandler(address, status, info, handler)
 		},
+		buildServerApplication,
 	)
 }
 
@@ -69,7 +71,7 @@ type runtimeServer interface {
 	Errors() <-chan error
 }
 
-type serverFactory func(string, httpserver.StatusSource, buildinfo.Info) runtimeServer
+type serverFactory func(string, httpserver.StatusSource, buildinfo.Info, http.Handler) runtimeServer
 
 func executeWithServerFactory(
 	ctx context.Context,
@@ -78,11 +80,31 @@ func executeWithServerFactory(
 	getenv func(string) string,
 	newServer serverFactory,
 ) error {
+	return executeWithFactories(ctx, args, stdout, getenv, newServer, buildServerApplication)
+}
+
+func executeWithFactories(
+	ctx context.Context,
+	args []string,
+	stdout io.Writer,
+	getenv func(string) string,
+	newServer serverFactory,
+	buildApplication applicationBuilder,
+) error {
 	flags := flag.NewFlagSet("panvara", flag.ContinueOnError)
 	flags.SetOutput(stdout)
 	showVersion := flags.Bool("version", false, "print version metadata and exit")
 	profileValue := flags.String("profile", envOr(getenv, "PANVARA_PROFILE", "lite"), "runtime profile")
 	address := flags.String("http", envOr(getenv, "PANVARA_HTTP_ADDR", "127.0.0.1:8080"), "HTTP listen address")
+	databaseURL := flags.String("database-url", envOr(getenv, "PANVARA_DATABASE_URL", ""), "PostgreSQL connection URL")
+	moduleSource := flags.String("module-source", envOr(getenv, "PANVARA_MODULE_SOURCE", ""), "AppModule YAML or JSON file")
+	moduleFormat := flags.String("module-format", envOr(getenv, "PANVARA_MODULE_FORMAT", "auto"), "AppModule format: auto, json, or yaml")
+	projectID := flags.String("project-id", envOr(getenv, "PANVARA_PROJECT_ID", ""), "single-project UUIDv7")
+	projectKey := flags.String("project-key", envOr(getenv, "PANVARA_PROJECT_KEY", "default"), "single-project readable key")
+	projectLocale := flags.String("project-locale", envOr(getenv, "PANVARA_PROJECT_LOCALE", "en-US"), "single-project BCP 47 locale")
+	projectZone := flags.String("project-time-zone", envOr(getenv, "PANVARA_PROJECT_TIME_ZONE", "UTC"), "single-project IANA time zone")
+	projectMoney := flags.String("project-currency", envOr(getenv, "PANVARA_PROJECT_CURRENCY", "USD"), "single-project ISO currency")
+	adminToken := flags.String("admin-token", envOr(getenv, "PANVARA_ADMIN_TOKEN", ""), "bootstrap administrator token (prefer PANVARA_ADMIN_TOKEN; CLI arguments are process-visible)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -114,8 +136,40 @@ func executeWithServerFactory(
 		)
 	}
 
+	var application *applicationRuntime
+	switch profileName {
+	case profile.Lite:
+	case profile.Server:
+		if buildApplication == nil {
+			return fmt.Errorf("server profile application builder is nil")
+		}
+		application, err = buildApplication(ctx, serverConfig{
+			databaseURL: *databaseURL, moduleSource: *moduleSource, moduleFormat: *moduleFormat,
+			projectID: *projectID, projectKey: *projectKey, projectLocale: *projectLocale,
+			projectZone: *projectZone, projectMoney: *projectMoney, adminToken: *adminToken,
+		})
+		if err != nil {
+			return fmt.Errorf("assemble server profile: %w", err)
+		}
+		if application == nil || application.handler == nil || application.ready == nil {
+			if application != nil {
+				application.Close()
+			}
+			return fmt.Errorf("assemble server profile: application router is nil")
+		}
+		defer application.Close()
+	default:
+		return fmt.Errorf("profile %q is marked implemented without a composition", profileName)
+	}
+
 	core := kernel.New()
-	server := newServer(*address, core, info)
+	var applicationHandler http.Handler
+	var readiness httpserver.StatusSource = core
+	if application != nil {
+		applicationHandler = application.handler
+		readiness = combinedReadiness{core: core, dependency: application.ready}
+	}
+	server := newServer(*address, readiness, info, applicationHandler)
 	if err := core.Register(server); err != nil {
 		return err
 	}
@@ -123,6 +177,9 @@ func executeWithServerFactory(
 		return err
 	}
 	fmt.Fprintf(stdout, "panvara %s profile=%s address=%s\n", info.Distribution, definition.Name, server.Addr())
+	if application != nil {
+		fmt.Fprintf(stdout, "module=%s revision=%s\n", application.module, application.revision)
+	}
 
 	var runErr error
 	select {
@@ -138,6 +195,16 @@ func executeWithServerFactory(
 	stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	return errors.Join(runErr, core.Stop(stopCtx))
+}
+
+type combinedReadiness struct {
+	core       httpserver.StatusSource
+	dependency httpserver.StatusSource
+}
+
+func (readiness combinedReadiness) Ready() bool {
+	return readiness.core != nil && readiness.core.Ready() &&
+		readiness.dependency != nil && readiness.dependency.Ready()
 }
 
 func envOr(getenv func(string) string, key, fallback string) string {

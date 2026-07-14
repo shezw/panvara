@@ -29,7 +29,14 @@ import (
 	"github.com/shezw/panvara/internal/buildinfo"
 )
 
-const componentName = "interfaces.http"
+const (
+	componentName            = "interfaces.http"
+	defaultReadHeaderTimeout = 5 * time.Second
+	defaultReadTimeout       = 15 * time.Second
+	defaultWriteTimeout      = 30 * time.Second
+	defaultIdleTimeout       = 60 * time.Second
+	defaultMaxHeaderBytes    = 1 << 20
+)
 
 // StatusSource supplies Core readiness without coupling this interface to a
 // concrete application implementation.
@@ -43,6 +50,7 @@ type Server struct {
 	address  string
 	status   StatusSource
 	info     buildinfo.Info
+	handler  http.Handler
 	server   *http.Server
 	listener net.Listener
 	errors   chan error
@@ -50,10 +58,22 @@ type Server struct {
 
 // New creates an operational server. The listener is opened by Start.
 func New(address string, status StatusSource, info buildinfo.Info) *Server {
+	return NewWithHandler(address, status, info, nil)
+}
+
+// NewWithHandler creates a server that combines operational routes with an
+// externally assembled application router. The listener is opened by Start.
+func NewWithHandler(
+	address string,
+	status StatusSource,
+	info buildinfo.Info,
+	handler http.Handler,
+) *Server {
 	return &Server{
 		address: address,
 		status:  status,
 		info:    info,
+		handler: handler,
 		errors:  make(chan error, 1),
 	}
 }
@@ -69,6 +89,9 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", server.handleHealth)
 	mux.HandleFunc("GET /readyz", server.handleReady)
 	mux.HandleFunc("GET /version", server.handleVersion)
+	if server.handler != nil {
+		mux.Handle("/", server.handler)
+	}
 	return mux
 }
 
@@ -89,11 +112,7 @@ func (server *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen on %q: %w", server.address, err)
 	}
-	httpServer := &http.Server{
-		Handler:           server.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	httpServer := server.newHTTPServer()
 	server.listener = listener
 	server.server = httpServer
 
@@ -106,6 +125,17 @@ func (server *Server) Start(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+func (server *Server) newHTTPServer() *http.Server {
+	return &http.Server{
+		Handler:           server.Handler(),
+		ReadHeaderTimeout: defaultReadHeaderTimeout,
+		ReadTimeout:       defaultReadTimeout,
+		WriteTimeout:      defaultWriteTimeout,
+		IdleTimeout:       defaultIdleTimeout,
+		MaxHeaderBytes:    defaultMaxHeaderBytes,
+	}
 }
 
 // Stop gracefully shuts down the HTTP listener.

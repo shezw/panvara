@@ -18,7 +18,7 @@ package buildinfo
 import "runtime"
 
 const (
-	DistributionVersion = "0.1.0-alpha.1"
+	DistributionVersion = "0.1.0-alpha.2"
 	CoreAPIVersion      = "core.panvara.dev/v1alpha1"
 	ModuleSpecVersion   = "panvara.dev/v1alpha1"
 	ProviderAPIVersion  = "provider.panvara.dev/v1alpha1"
@@ -71,7 +71,7 @@ func Current() Info {
 		CoreAPI:      Protocol{Version: CoreAPIVersion, Status: Experimental},
 		ModuleSpec:   Protocol{Version: ModuleSpecVersion, Status: Experimental},
 		ProviderAPI:  Protocol{Version: ProviderAPIVersion, Status: Planned},
-		IRFormat:     Format{Version: IRFormatVersion, Status: Planned},
+		IRFormat:     Format{Version: IRFormatVersion, Status: Experimental},
 		Commit:       Commit,
 		BuildDate:    BuildDate,
 		GoVersion:    runtime.Version(),

@@ -25,9 +25,9 @@ func TestRegistryOrdersDependenciesDeterministically(t *testing.T) {
 
 	base := minimalDescriptor("base")
 	feature := minimalDescriptor("feature")
-	feature.Requires.Modules = []string{"base"}
+	feature.Requires.Modules = []ModuleRequirement{{Name: "base", Version: "^1.0.0"}}
 	ui := minimalDescriptor("ui")
-	ui.Requires.Modules = []string{"feature"}
+	ui.Requires.Modules = []ModuleRequirement{{Name: "feature", Version: ">=1.0.0 <2.0.0"}}
 
 	registry, err := NewRegistry([]Descriptor{ui, feature, base})
 	if err != nil {
@@ -47,9 +47,20 @@ func TestRegistryRejectsMissingDependency(t *testing.T) {
 	t.Parallel()
 
 	module := minimalDescriptor("feature")
-	module.Requires.Modules = []string{"base"}
+	module.Requires.Modules = []ModuleRequirement{{Name: "base", Version: "*"}}
 	if _, err := NewRegistry([]Descriptor{module}); err == nil {
 		t.Fatal("NewRegistry() accepted a missing dependency")
+	}
+}
+
+func TestRegistryRejectsDependencyVersionMismatch(t *testing.T) {
+	t.Parallel()
+
+	base := minimalDescriptor("base")
+	feature := minimalDescriptor("feature")
+	feature.Requires.Modules = []ModuleRequirement{{Name: "base", Version: ">=2.0.0 <3.0.0"}}
+	if _, err := NewRegistry([]Descriptor{base, feature}); err == nil {
+		t.Fatal("NewRegistry() accepted a dependency version mismatch")
 	}
 }
 
@@ -68,9 +79,9 @@ func TestRegistryRejectsDependencyCycle(t *testing.T) {
 	t.Parallel()
 
 	left := minimalDescriptor("left")
-	left.Requires.Modules = []string{"right"}
+	left.Requires.Modules = []ModuleRequirement{{Name: "right", Version: "*"}}
 	right := minimalDescriptor("right")
-	right.Requires.Modules = []string{"left"}
+	right.Requires.Modules = []ModuleRequirement{{Name: "left", Version: "*"}}
 	_, err := NewRegistry([]Descriptor{left, right})
 	if err == nil || !strings.Contains(err.Error(), "cycle") {
 		t.Fatalf("NewRegistry() error = %v, want cycle", err)
@@ -99,5 +110,5 @@ func TestRegistryReturnsDefensiveCopies(t *testing.T) {
 }
 
 func minimalDescriptor(name string) Descriptor {
-	return Descriptor{APIVersion: APIVersion, Name: name, Version: "1.0.0"}
+	return Descriptor{Name: name, Version: "1.0.0"}
 }

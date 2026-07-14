@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -97,7 +98,7 @@ func TestExecuteBootsAndStopsLiteProfile(t *testing.T) {
 		[]string{"--profile=lite", "--http=127.0.0.1:0"},
 		&output,
 		emptyEnvironment,
-		func(string, httpserver.StatusSource, buildinfo.Info) runtimeServer {
+		func(string, httpserver.StatusSource, buildinfo.Info, http.Handler) runtimeServer {
 			return server
 		},
 	)
@@ -124,7 +125,7 @@ func TestExecuteStopsCoreAfterRuntimeFailure(t *testing.T) {
 		[]string{"--profile=lite"},
 		&output,
 		emptyEnvironment,
-		func(string, httpserver.StatusSource, buildinfo.Info) runtimeServer {
+		func(string, httpserver.StatusSource, buildinfo.Info, http.Handler) runtimeServer {
 			return server
 		},
 	)
@@ -133,6 +134,114 @@ func TestExecuteStopsCoreAfterRuntimeFailure(t *testing.T) {
 	}
 	if !server.stopped {
 		t.Fatal("runtime failure did not stop the Core")
+	}
+}
+
+func TestExecuteServerProfileAssemblesApplicationRouter(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	server := &fakeRuntimeServer{errors: make(chan error)}
+	applicationClosed := false
+	router := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	var output bytes.Buffer
+	err := executeWithFactories(
+		ctx,
+		[]string{
+			"--profile=server",
+			"--database-url=postgres://redacted",
+			"--module-source=crm.yaml",
+			"--project-id=018f7e93-7b2c-7abc-8def-1234567890ab",
+			"--admin-token=panvara-test-token-32-bytes-minimum",
+		},
+		&output,
+		emptyEnvironment,
+		func(_ string, _ httpserver.StatusSource, _ buildinfo.Info, handler http.Handler) runtimeServer {
+			if handler == nil {
+				t.Fatal("server received a nil application handler")
+			}
+			return server
+		},
+		func(_ context.Context, config serverConfig) (*applicationRuntime, error) {
+			if config.databaseURL != "postgres://redacted" || config.moduleSource != "crm.yaml" ||
+				config.projectID != "018f7e93-7b2c-7abc-8def-1234567890ab" {
+				t.Fatalf("server config = %+v", config)
+			}
+			return &applicationRuntime{
+				handler: router, module: "crm", revision: testRevisionHash, ready: readinessStatus(true),
+				close: func() { applicationClosed = true },
+			}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !applicationClosed || !server.started || !server.stopped {
+		t.Fatalf("closed/started/stopped = %v/%v/%v", applicationClosed, server.started, server.stopped)
+	}
+	if !strings.Contains(output.String(), "profile=server") || !strings.Contains(output.String(), "module=crm") {
+		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestCombinedReadinessRequiresCoreAndDatabase(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		core       bool
+		dependency bool
+		want       bool
+	}{
+		{core: true, dependency: true, want: true},
+		{core: true, dependency: false},
+		{core: false, dependency: true},
+	} {
+		got := (combinedReadiness{
+			core: readinessStatus(test.core), dependency: readinessStatus(test.dependency),
+		}).Ready()
+		if got != test.want {
+			t.Fatalf("combined readiness %v/%v = %v, want %v", test.core, test.dependency, got, test.want)
+		}
+	}
+}
+
+func TestExecuteServerProfileRequiresCompleteComposition(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	err := execute(context.Background(), []string{"--profile=server"}, &output, emptyEnvironment)
+	if err == nil || !strings.Contains(err.Error(), "server profile requires") {
+		t.Fatalf("execute() error = %v", err)
+	}
+	if strings.Contains(err.Error(), "postgres://") {
+		t.Fatalf("error leaked a database URL: %v", err)
+	}
+}
+
+func TestParseModuleFormat(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		value string
+		path  string
+		want  string
+	}{
+		{value: "json", path: "model.unknown", want: "json"},
+		{value: "yaml", path: "model.unknown", want: "yaml"},
+		{value: "auto", path: "model.yml", want: "yaml"},
+		{path: "model.json", want: "json"},
+	} {
+		format, err := parseModuleFormat(test.value, test.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(format) != test.want {
+			t.Fatalf("parseModuleFormat(%q, %q) = %q", test.value, test.path, format)
+		}
+	}
+	if _, err := parseModuleFormat("auto", "model.txt"); err == nil {
+		t.Fatal("parseModuleFormat accepted an unknown extension")
 	}
 }
 
@@ -169,3 +278,9 @@ func (server *fakeRuntimeServer) Errors() <-chan error {
 }
 
 var _ kernel.Component = (*fakeRuntimeServer)(nil)
+
+const testRevisionHash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+type readinessStatus bool
+
+func (status readinessStatus) Ready() bool { return bool(status) }

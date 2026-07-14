@@ -46,77 +46,81 @@ flowchart TB
     App --> Ports
     Ports --> Infra
     Ports --> Providers
-    Control -->|"publish immutable revision"| Domain
+    Control -->|"planned alpha.3+ publish use case"| App
 ```
 
-代码依赖只能指向内层：
+代码依赖以消费方定义的 Port 为中心：
 
-    interfaces -> application -> domain <- infrastructure
+    interfaces ----> application ----> domain
+    infrastructure -> application
+    bootstrap ------> interfaces + infrastructure
 
 - Domain 是纯 Go 规则，不依赖数据库、HTTP、消息中间件和 Provider SDK。
 - Application 编排用例和事务，通过 Port 接口请求外部能力。
 - Interfaces 负责 HTTP、CLI、未来的 gRPC 和 Manager 接口。
-- Infrastructure 实现 PostgreSQL、消息、缓存、对象存储与第三方适配。
+- Infrastructure 实现由 Application 消费方定义的 Store/Provider Port，因此可以依赖 Application 契约和 Domain 值类型；Application/Domain 不能反向依赖 Infrastructure。
 - Bootstrap 根据 Profile 显式装配实现；禁止隐藏式全局依赖和 Service Locator。
 
 ## 3. 可组合运行 Profile
 
 | Preset | 适用场景 | 运行角色 / 业务能力 | 外部依赖 |
 | --- | --- | --- | --- |
-| Lite | 小工具、原型、嵌入式服务 | all-in-one / AppModule | 无 |
+| Lite | Core 启动与运维验证 | all-in-one / Core lifecycle；AppModule 仅模型库 | 无 |
 | Server | 通用 App 后端 | server / AppModule | PostgreSQL |
 | Manager | 需要管理后台 | server + manager / AppModule | PostgreSQL |
 | Site | 内容站与网站 | server / AppModule + Site + Assets | PostgreSQL；对象存储可选 |
 | Commerce | 商城或付费产品 | server / AppModule + Commerce + Payments | PostgreSQL；缓存可选 |
 | Distributed | 分离 API 和 Worker | server + worker / 可配置业务能力 | PostgreSQL；NATS 可选 |
 
-Preset 是常用组合，不是继承树：Site 不强制 Manager，Commerce 不强制 Site，Headless 场景是一等公民。实现上把运行角色与业务 Feature 分开配置；只有当负载、隔离、安全或发布节奏确有差异时才拆进程。alpha.1 仅实现 Lite，其余 Preset 被识别为 planned 并拒绝伪启动。
+Preset 是常用组合，不是继承树：Site 不强制 Manager，Commerce 不强制 Site，Headless 场景是一等公民。实现上把运行角色与业务 Feature 分开配置；只有当负载、隔离、安全或发布节奏确有差异时才拆进程。alpha.2 已实现 Lite 与 Server；Manager、Site、Commerce 和 Distributed 仍是 planned 并拒绝伪启动。
 
 ## 4. 数据模型驱动模块
 
-动态模块不以“上传任意代码”为目标，而以受控声明生成能力：
+动态模块不以“上传任意代码”为目标，而以受控声明生成能力。alpha.2 当前链路是：
 
 ```mermaid
 flowchart LR
     Text["YAML / JSON / Manager 表单"]
     Validate["Schema + Semantic Validate"]
     IR["Canonical IR + Hash"]
-    Plan["Migration / API / UI Plan"]
-    Publish["Publish Revision"]
-    Runtime["Runtime Activation"]
-    Rollback["Rollback"]
+    Artifact["OpenAPI + Manager UI Schema"]
+    Runtime["Server startup runtime"]
 
-    Text --> Validate --> IR --> Plan --> Publish --> Runtime
-    Runtime --> Rollback
+    Text --> Validate --> IR
+    IR --> Artifact
+    IR --> Runtime
 ```
 
-AppModule v1alpha1 首批表达：
+alpha.2 的 AppModule v1alpha1 已表达：
 
-- Resource、Field、Relation、索引与基础约束。
-- 基础 CRUD、校验、角色/所有者权限、标签和审计元数据。
-- 受控 Action 和 Event；副作用只能调用注册过且具备权限的 Capability。
+- Resource、Field、reference、唯一/引用索引与基础约束。
+- Public Create、Admin CRUD、等值过滤、字段写入白名单和 bootstrap owner 边界。
 - Manager 表单和列表的 UI Schema。
 - 模块依赖、能力声明、冲突和版本约束。
 
+动态排序、角色/所有者策略扩展、受控 Action/Event、审计、Draft/Plan/Publish/Activate/Rollback 都是 alpha.3 或后续目标，不属于 alpha.2 Runtime。
+
+alpha.2 的 `requires.capabilities` 只进入 Canonical IR 与 Revision Hash；Bootstrap 不解析 Capability，也不会让缺失 Capability 影响 readiness 或 Runtime 行为。
+
 模块依赖与 Capability 依赖是两种不同关系：前者形成确定的模块拓扑，后者由 Bootstrap 从本地模块或 Provider Adapter 中解析。字段/Resource、模块名和 Capability 分别使用独立命名规则，避免把 JSON Path、SQL 映射和协议命名混为一谈。
 
-alpha.2 开始把作者输入和 Canonical Domain 分离：
+alpha.2 已把作者输入和 Canonical Domain 分离：
 
     spec/appmodule/v1alpha1 DTO + decoder
                     -> application compiler
                     -> domain/appmodule canonical model
                     -> immutable Module IR
 
-旧 Spec 通过 Converter 进入当前 Canonical Model；Domain 不携带 YAML 兼容分支。
+未来旧 Spec 将通过 Converter 进入当前 Canonical Model；alpha.2 尚无旧版本 Converter，Domain 不携带 YAML 兼容分支。
 
 明确禁止：
 
 - 任意 Go、JavaScript、Shell 或 SQL。
 - 模型直接持有 Provider 密钥。
 - 绕过事务、权限、审计和资源限额的表达式。
-- 未经 Plan/Publish 就修改活动数据库结构。
+- 在请求热路径修改数据库结构；alpha.2 只使用固定 flex migration。
 
-模型发布采用 Draft → Validate → Plan → Publish → Activate；每个 Revision 使用内容哈希标识，可审计、可回滚。自然语言模型只负责生成候选声明，Core 的确定性校验器与发布器才拥有最终决定权。
+alpha.3 计划采用 Draft → Validate → Plan → Publish → Activate，并补齐审计与回滚。alpha.2 只有启动时 Compile/Hash，没有发布状态机；自然语言模型即使生成候选声明，也必须经过确定性解码和校验。
 
 ## 5. 全球 Provider 体系
 
@@ -143,7 +147,7 @@ Core 面向 Capability 编程，第三方厂商只是 Adapter。Provider 协议�
 
 ## 6. 分布式管理
 
-标准分布式形态分成数据面和控制面：
+以下是 alpha.3 之后的分布式目标，不是 alpha.2 已实现能力：
 
 - 数据面：无状态 API 节点和可水平扩展 Worker；请求显式携带 ProjectContext。
 - 控制面：Manager 管理模型、配置、Provider 引用和发布；产出不可变 Revision。
@@ -189,12 +193,20 @@ Core 面向 Capability 编程，第三方厂商只是 Adapter。Provider 协议�
 - Country/Region：使用稳定代码和可更新目录，不把政治或税务规则硬编码进 Core。
 - 删除与审计：业务删除、保留策略和不可变审计事件分开表达。
 
-alpha.1 对 Locale 和 Currency 只做结构校验。v0.1 前要接入标准 BCP 47 Parser、可版本化 ISO 4217 Catalog 与 minor-unit exponent，并在发行物中固定 IANA 时区数据来源。
+截至 alpha.2，Locale 和 Currency 仍只做结构校验。v0.1 前要接入标准 BCP 47 Parser、可版本化 ISO 4217 Catalog 与 minor-unit exponent；发行物已经嵌入 Go 的 IANA 时区数据。
 
 ## 9. 当前落地与后续
 
-v0.1.0-alpha.1 已落地版本信息、Profile 描述、ProjectContext、Money、AppModule 描述校验与依赖注册、Kernel 生命周期、健康接口和自动化门禁。
+v0.1.0-alpha.2 已落地严格 YAML/JSON AppModule 解码、Canonical IR/Hash、OpenAPI、Manager UI Schema、flex JSONB Store、Public Create、Admin CRUD、等值过滤、Lite/Server Profile 和 PostgreSQL 18.4 必需集成门禁。
 
-尚未落地 PostgreSQL Adapter、模型持久化、发布状态机、Manager、Provider Runtime 和分布式进程。这些按 [Core v0 计划](core-v0.md) 逐步进入，而不是提前创建空实现。
+alpha.2 的 Server 每次启动都从 Source 计算 Revision，尚无发布 Registry、迁移计划或 Scope 重绑定。任何 Canonical IR 变化都会形成全新的空数据命名空间；旧 Revision 的 Record、唯一值和引用完整保留且按 Revision 隔离，不迁移、不重绑，只有切回完全相同的 Source/Hash 才会重新访问。alpha.3 完成前，持久化环境必须保存不可变 Source + Hash 并在变更前备份数据库；覆盖 Source 不是升级。
+
+alpha.3 必须通过 ADR 定案迁移与激活协议：迁移任务显式且幂等，保留 `record_id`，在目标 namespace 重建 unique/reference 约束，校验成功后原子 Activate，失败或回滚继续使用旧 namespace；同时决定 ModuleRevision 与 DataSchemaRevision 是否拆成独立版本轴。
+
+第二个 HTTP/gRPC/Worker 入口进入前，授权必须从 Interfaces 下沉到 Application：Use Case 显式接收并校验 Project、Actor、Surface 和 Operation，Interfaces 只负责认证材料转换与协议映射，不能成为唯一授权边界。
+
+alpha.3 还必须验证业务写入与 Outbox 同事务、ProjectReleaseSnapshot + epoch 固定执行版本，并评估超过当前 512 字节唯一值边界时是否采用 Hash 索引加原值碰撞复核；这些都不是 alpha.2 已实现能力。
+
+尚未落地动态排序、发布/激活/回滚、完整 Manager 应用、Outbox/Worker、Provider Runtime 和分布式进程。这些按 [Core v0 计划](core-v0.md) 逐步进入，而不是提前创建空实现。
 
 开发和质量基线分别见 [开发环境](development.md) 与 [验证测试框架](testing.md)。

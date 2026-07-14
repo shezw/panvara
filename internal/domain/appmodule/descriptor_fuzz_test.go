@@ -22,9 +22,8 @@ func FuzzDescriptorValidateNeverPanics(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, module, version, resource, field, kind string) {
 		descriptor := Descriptor{
-			APIVersion: APIVersion,
-			Name:       module,
-			Version:    version,
+			Name:    module,
+			Version: version,
 			Resources: []Resource{{
 				Name: resource,
 				Fields: []Field{{

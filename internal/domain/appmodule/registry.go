@@ -43,8 +43,22 @@ func NewRegistry(descriptors []Descriptor) (*Registry, error) {
 
 	for name, descriptor := range byName {
 		for _, dependency := range descriptor.Requires.Modules {
-			if _, exists := byName[dependency]; !exists {
-				return nil, fmt.Errorf("module %q requires missing module %q", name, dependency)
+			required, exists := byName[dependency.Name]
+			if !exists {
+				return nil, fmt.Errorf("module %q requires missing module %q", name, dependency.Name)
+			}
+			matches, err := SatisfiesVersionRange(required.Version, dependency.Version)
+			if err != nil {
+				return nil, fmt.Errorf("module %q dependency %q: %w", name, dependency.Name, err)
+			}
+			if !matches {
+				return nil, fmt.Errorf(
+					"module %q requires module %q version %q; installed version is %q",
+					name,
+					dependency.Name,
+					dependency.Version,
+					required.Version,
+				)
 			}
 		}
 		for _, conflict := range descriptor.Conflicts {
@@ -109,7 +123,10 @@ func dependencyOrder(byName map[string]Descriptor) ([]string, error) {
 		}
 		state[name] = visiting
 		stack = append(stack, name)
-		dependencies := append([]string(nil), byName[name].Requires.Modules...)
+		dependencies := make([]string, 0, len(byName[name].Requires.Modules))
+		for _, dependency := range byName[name].Requires.Modules {
+			dependencies = append(dependencies, dependency.Name)
+		}
 		sort.Strings(dependencies)
 		for _, dependency := range dependencies {
 			if err := visit(dependency); err != nil {
@@ -130,8 +147,14 @@ func dependencyOrder(byName map[string]Descriptor) ([]string, error) {
 	return order, nil
 }
 
+// Clone returns a deep copy safe for use across registry and compiler boundaries.
+func (descriptor Descriptor) Clone() Descriptor {
+	return cloneDescriptor(descriptor)
+}
+
 func cloneDescriptor(descriptor Descriptor) Descriptor {
-	descriptor.Requires.Modules = append([]string(nil), descriptor.Requires.Modules...)
+	descriptor.Labels = cloneLabels(descriptor.Labels)
+	descriptor.Requires.Modules = append([]ModuleRequirement(nil), descriptor.Requires.Modules...)
 	descriptor.Requires.Capabilities = append(
 		[]string(nil),
 		descriptor.Requires.Capabilities...,
@@ -140,13 +163,60 @@ func cloneDescriptor(descriptor Descriptor) Descriptor {
 	descriptor.Conflicts = append([]string(nil), descriptor.Conflicts...)
 	descriptor.Resources = append([]Resource(nil), descriptor.Resources...)
 	for index := range descriptor.Resources {
+		descriptor.Resources[index].Labels = cloneLabels(descriptor.Resources[index].Labels)
 		descriptor.Resources[index].Fields = append([]Field(nil), descriptor.Resources[index].Fields...)
+		descriptor.Resources[index].API.Public = cloneAccess(descriptor.Resources[index].API.Public)
+		descriptor.Resources[index].API.Admin = cloneAccess(descriptor.Resources[index].API.Admin)
+		descriptor.Resources[index].Manager.List.Columns = append(
+			[]string(nil),
+			descriptor.Resources[index].Manager.List.Columns...,
+		)
+		descriptor.Resources[index].Manager.List.Filters = append(
+			[]string(nil),
+			descriptor.Resources[index].Manager.List.Filters...,
+		)
+		descriptor.Resources[index].Manager.Form.Fields = append(
+			[]string(nil),
+			descriptor.Resources[index].Manager.Form.Fields...,
+		)
 		for fieldIndex := range descriptor.Resources[index].Fields {
-			descriptor.Resources[index].Fields[fieldIndex].Options = append(
+			field := &descriptor.Resources[index].Fields[fieldIndex]
+			field.Labels = cloneLabels(field.Labels)
+			field.Options = append(
 				[]string(nil),
-				descriptor.Resources[index].Fields[fieldIndex].Options...,
+				field.Options...,
 			)
+			field.Constraints.MaxLength = cloneInt(field.Constraints.MaxLength)
+			field.Constraints.Precision = cloneInt(field.Constraints.Precision)
+			field.Constraints.Scale = cloneInt(field.Constraints.Scale)
 		}
 	}
 	return descriptor
+}
+
+func cloneAccess(access Access) Access {
+	access.Operations = append([]Operation(nil), access.Operations...)
+	access.Writable = append([]string(nil), access.Writable...)
+	access.Filterable = append([]string(nil), access.Filterable...)
+	access.Sortable = append([]string(nil), access.Sortable...)
+	return access
+}
+
+func cloneLabels(labels map[string]string) map[string]string {
+	if labels == nil {
+		return nil
+	}
+	result := make(map[string]string, len(labels))
+	for key, value := range labels {
+		result[key] = value
+	}
+	return result
+}
+
+func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	result := *value
+	return &result
 }

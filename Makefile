@@ -11,14 +11,18 @@ BINARY := bin/panvara
 GO_PACKAGES := ./...
 GO_FILES := $(shell find . -type f -name '*.go' -not -path './.git/*')
 
-.PHONY: help fmt fmt-check test test-race vet build verify run infra-up infra-down clean
+.PHONY: help fmt fmt-check test test-race test-integration test-server-smoke test-e2e vet build verify run run-server infra-up infra-down clean
 
 help:
 	@echo "Panvara development commands"
-	@echo "  make run        Run the lite profile"
-	@echo "  make verify     Run the complete pull-request gate"
-	@echo "  make infra-up   Start local PostgreSQL"
-	@echo "  make infra-down Stop local PostgreSQL"
+	@echo "  make run               Run the Lite profile"
+	@echo "  make run-server        Run Server from exported PANVARA_* variables"
+	@echo "  make verify            Run the Docker-free pull-request gate"
+	@echo "  make test-integration  Require PostgreSQL 18.4 integration tests"
+	@echo "  make test-server-smoke Require the Server HTTP persistence smoke test"
+	@echo "  make test-e2e          Run all required alpha.2 integration tests"
+	@echo "  make infra-up          Start local PostgreSQL"
+	@echo "  make infra-down        Stop local PostgreSQL"
 
 fmt:
 	$(GOFMT) -w $(GO_FILES)
@@ -32,6 +36,14 @@ test:
 test-race:
 	$(GO) test -race -shuffle=on -count=1 $(GO_PACKAGES)
 
+test-integration:
+	PANVARA_REQUIRE_DOCKER=1 $(GO) test -tags=integration -shuffle=on -count=1 ./tests/integration
+
+test-server-smoke:
+	PANVARA_REQUIRE_DOCKER=1 $(GO) test -tags=integration -shuffle=on -count=1 -run '^TestServerProfileHTTPPersistenceLifecycle$$' ./cmd/panvara
+
+test-e2e: test-integration test-server-smoke
+
 vet:
 	$(GO) vet $(GO_PACKAGES)
 
@@ -43,6 +55,10 @@ verify: fmt-check vet test test-race build
 
 run:
 	$(GO) run ./cmd/panvara --profile=lite
+
+run-server:
+	@test -n "$$PANVARA_ADMIN_TOKEN" || { echo "PANVARA_ADMIN_TOKEN must be exported; generate at least 32 random bytes" >&2; exit 1; }
+	$(GO) run ./cmd/panvara --profile=server
 
 infra-up:
 	docker compose -f deploy/compose/compose.yaml up -d --wait

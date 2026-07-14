@@ -46,91 +46,81 @@ func TestDescriptorValidateRejectsUnsafeOrAmbiguousModels(t *testing.T) {
 		descriptor Descriptor
 	}{
 		{
-			name:       "api version",
-			descriptor: Descriptor{APIVersion: "v1", Name: "crm", Version: "1.0.0"},
-		},
-		{
 			name:       "module name",
-			descriptor: Descriptor{APIVersion: APIVersion, Name: "CRM Leads", Version: "1.0.0"},
+			descriptor: Descriptor{Name: "CRM Leads", Version: "1.0.0"},
 		},
 		{
 			name:       "semantic version",
-			descriptor: Descriptor{APIVersion: APIVersion, Name: "crm", Version: "latest"},
+			descriptor: Descriptor{Name: "crm", Version: "latest"},
 		},
 		{
 			name:       "semantic version numeric prerelease leading zero",
-			descriptor: Descriptor{APIVersion: APIVersion, Name: "crm", Version: "1.0.0-01"},
+			descriptor: Descriptor{Name: "crm", Version: "1.0.0-01"},
 		},
 		{
 			name: "self dependency",
 			descriptor: Descriptor{
-				APIVersion: APIVersion,
-				Name:       "crm",
-				Version:    "1.0.0",
-				Requires:   Requirements{Modules: []string{"crm"}},
+				Name:    "crm",
+				Version: "1.0.0",
+				Requires: Requirements{Modules: []ModuleRequirement{{
+					Name: "crm", Version: "*",
+				}}},
 			},
 		},
 		{
 			name: "capability without protocol version",
 			descriptor: Descriptor{
-				APIVersion: APIVersion,
-				Name:       "crm",
-				Version:    "1.0.0",
-				Provides:   []string{"crm.records"},
+				Name:     "crm",
+				Version:  "1.0.0",
+				Provides: []string{"crm.records"},
 			},
 		},
 		{
 			name: "duplicate resource",
 			descriptor: Descriptor{
-				APIVersion: APIVersion,
-				Name:       "crm",
-				Version:    "1.0.0",
-				Resources:  []Resource{{Name: "lead"}, {Name: "lead"}},
+				Name:      "crm",
+				Version:   "1.0.0",
+				Resources: []Resource{{Name: "lead"}, {Name: "lead"}},
 			},
 		},
 		{
 			name: "reserved field",
 			descriptor: Descriptor{
-				APIVersion: APIVersion,
-				Name:       "crm",
-				Version:    "1.0.0",
-				Resources:  []Resource{{Name: "lead", Fields: []Field{{Name: "project_id", Kind: KindString}}}},
+				Name:      "crm",
+				Version:   "1.0.0",
+				Resources: []Resource{{Name: "lead", Fields: []Field{{Name: "project_id", Kind: KindString}}}},
 			},
 		},
 		{
 			name: "unknown field kind",
 			descriptor: Descriptor{
-				APIVersion: APIVersion,
-				Name:       "crm",
-				Version:    "1.0.0",
-				Resources:  []Resource{{Name: "lead", Fields: []Field{{Name: "name", Kind: "script"}}}},
+				Name:      "crm",
+				Version:   "1.0.0",
+				Resources: []Resource{{Name: "lead", Fields: []Field{{Name: "name", Kind: "script"}}}},
 			},
 		},
 		{
 			name: "enum without options",
 			descriptor: Descriptor{
-				APIVersion: APIVersion,
-				Name:       "crm",
-				Version:    "1.0.0",
-				Resources:  []Resource{{Name: "lead", Fields: []Field{{Name: "stage", Kind: KindEnum}}}},
+				Name:      "crm",
+				Version:   "1.0.0",
+				Resources: []Resource{{Name: "lead", Fields: []Field{{Name: "stage", Kind: KindEnum}}}},
 			},
 		},
 		{
 			name: "missing reference target",
 			descriptor: Descriptor{
-				APIVersion: APIVersion,
-				Name:       "crm",
-				Version:    "1.0.0",
-				Resources:  []Resource{{Name: "lead", Fields: []Field{{Name: "owner", Kind: KindReference, Target: "user"}}}},
+				Name:      "crm",
+				Version:   "1.0.0",
+				Resources: []Resource{{Name: "lead", Fields: []Field{{Name: "owner", Kind: KindReference, Target: "user"}}}},
 			},
 		},
 		{
 			name: "incompatible metadata",
 			descriptor: Descriptor{
-				APIVersion: APIVersion,
-				Name:       "crm",
-				Version:    "1.0.0",
-				Resources:  []Resource{{Name: "lead", Fields: []Field{{Name: "name", Kind: KindString, Target: "lead"}}}},
+				Name:      "crm",
+				Version:   "1.0.0",
+				Resources: []Resource{{Name: "lead", Fields: []Field{{Name: "name", Kind: KindString, Target: "lead"}}}},
 			},
 		},
 	}
@@ -160,10 +150,9 @@ func TestDescriptorValidateRejectsOversizedModel(t *testing.T) {
 
 func validDescriptor(name string) Descriptor {
 	return Descriptor{
-		APIVersion: APIVersion,
-		Name:       name,
-		Version:    "1.0.0",
-		Provides:   []string{"crm.records/v1alpha1"},
+		Name:     name,
+		Version:  "1.0.0",
+		Provides: []string{"crm.records/v1alpha1"},
 		Resources: []Resource{
 			{
 				Name: "organization",
@@ -174,11 +163,15 @@ func validDescriptor(name string) Descriptor {
 			{
 				Name: "lead",
 				Fields: []Field{
-					{Name: "email", Kind: KindEmail, Unique: true},
+					{Name: "email", Kind: KindEmail, Unique: true, Constraints: Constraints{MaxLength: intPointer(320)}},
 					{Name: "stage", Kind: KindEnum, Options: []string{"new", "qualified", "won"}},
 					{Name: "organization", Kind: KindReference, Target: "organization"},
 				},
 			},
 		},
 	}
+}
+
+func intPointer(value int) *int {
+	return &value
 }

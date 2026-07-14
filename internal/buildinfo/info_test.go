@@ -17,7 +17,8 @@ package buildinfo
 import (
 	"testing"
 
-	"github.com/shezw/panvara/internal/domain/appmodule"
+	appmodule "github.com/shezw/panvara/internal/application/appmodule"
+	spec "github.com/shezw/panvara/internal/spec/appmodule/v1alpha1"
 )
 
 func TestCurrentIncludesEveryVersionAxis(t *testing.T) {
@@ -33,17 +34,20 @@ func TestCurrentIncludesEveryVersionAxis(t *testing.T) {
 	if info.IRFormat.Version < 1 {
 		t.Fatalf("IR format must be positive: %d", info.IRFormat.Version)
 	}
+	if IRFormatVersion != appmodule.IRFormatVersion {
+		t.Fatalf("buildinfo IR format %d differs from compiler IR format %d", IRFormatVersion, appmodule.IRFormatVersion)
+	}
 	if info.GoVersion == "" {
 		t.Fatal("Go version must be reported")
 	}
-	if info.ProviderAPI.Status != Planned || info.IRFormat.Status != Planned {
-		t.Fatalf("unimplemented contracts must be reported as planned: %+v", info)
+	if info.ProviderAPI.Status != Planned || info.IRFormat.Status != Experimental {
+		t.Fatalf("protocol implementation status is incorrect: %+v", info)
 	}
-	if info.ModuleSpec.Version != appmodule.APIVersion {
+	if info.ModuleSpec.Version != spec.APIVersion {
 		t.Fatalf(
 			"reported module spec %q differs from validator %q",
 			info.ModuleSpec.Version,
-			appmodule.APIVersion,
+			spec.APIVersion,
 		)
 	}
 }

@@ -25,12 +25,12 @@
 | 层 | 目标 | 工具与方式 | 当前状态 |
 | --- | --- | --- | --- |
 | Domain | Money、ProjectContext、模型规则、模块图 | testing、表驱动、property、fuzz | 已建立 |
-| Application | 用例、事务、幂等、生命周期 | fake Port、失败注入、race | Kernel 已建立 |
-| HTTP | 状态码、JSON、错误信封、OpenAPI | httptest、契约 golden | 运维接口已建立 |
-| PostgreSQL | 迁移、事务、查询、重启恢复 | Testcontainers + 真 PostgreSQL | alpha.2 |
-| Provider | Adapter 是否满足 Capability | 共享 conformance suite | alpha.3 |
-| AppModule | 解码、IR、兼容、恶意输入 | golden、fuzz、compat matrix | 语义 seed 已建立 |
-| Profile/E2E | Lite/Server/Manager 纵向闭环 | 真实二进制和临时依赖 | CLI 装配已建立；真实 E2E 待建 |
+| Application | Record 用例、校验、并发版本、Kernel 生命周期 | fake Port、失败注入、race | alpha.2 已建立；发布生命周期待 alpha.3 |
+| HTTP | 状态码、JSON、鉴权、错误信封、ETag、OpenAPI | httptest、契约断言 | alpha.2 Public Create/Admin CRUD 已建立 |
+| PostgreSQL | migration、事务、唯一/引用、分页、重启恢复 | PostgreSQL 18.4 Service URL 或临时 Docker | alpha.2 required integration 已建立 |
+| Provider | Adapter 是否满足 Capability | 共享 conformance suite | alpha.3 planned |
+| AppModule | 严格解码、IR、OpenAPI、Manager Schema、恶意输入 | golden、fuzz、语义校验 | alpha.2 已建立；迁移兼容矩阵待 alpha.3 |
+| Profile/E2E | Lite/Server 纵向闭环 | 真实 listener + PostgreSQL 18.4 | alpha.2 Server HTTP 持久化 smoke 已建立；发布 E2E 待 alpha.3 |
 | Non-functional | race、benchmark、load、fault | Go race/bench + 专项压测 | 基础 race 已建立 |
 | Supply chain | 漏洞、SBOM、许可、签名 | govulncheck、生成/验证工具 | RC 前 |
 
@@ -38,35 +38,41 @@
 
 ## 3. 当前 PR 门禁
 
-make verify 依次验证：
+Docker-free 的 `make verify` 依次验证：
 
 1. gofmt 无漂移。
 2. go vet 全包通过。
 3. 单元测试以随机顺序、单次非缓存执行。
 4. Race Detector 全包通过。
-5. cmd/panvara 可构建。
+5. `cmd/panvara` 可构建。
 
-CI 额外用前一 Go 主版本运行 vet、test、build。当前仓库无外部依赖，因此门禁不要求 Docker。
+独立 required integration Job 使用 Go 1.26.5 与 PostgreSQL 18.4 Service 执行 `make test-e2e`：
 
-## 4. 后续门禁分级
+1. `make test-integration` 验证 fresh/idempotent migration、精确 decimal、Project 隔离、唯一约束、引用约束、乐观并发、分页/过滤与软删除。
+2. `make test-server-smoke` 验证模块 Artifact、Public Create、Admin CRUD/过滤、ETag、真实 listener、进程重装配后的 Record 持久化。
+
+该 Job 同时设置 `PANVARA_TEST_DATABASE_URL` 与 `PANVARA_REQUIRE_DOCKER=1`；数据库不可用或版本不是 18.4 时必须失败，不能 Skip。Go 1.25.12 兼容 Job 只运行 vet、无 tag 的 unit 和 build，设置 `GOTOOLCHAIN=local`，不需要 Docker。
+
+本地 `make test-integration`/`make test-server-smoke` 也设置 `PANVARA_REQUIRE_DOCKER=1`：没有外部测试 URL且 Docker 不可用时会失败。默认 `make test` 与 `make verify` 不包含 integration tag，不会隐式启动 Docker。
+
+## 4. 门禁分级
 
 ### Pull Request：目标 10–15 分钟
 
-- 当前 make verify。
-- PostgreSQL fresh migration 与核心 Repository 集成测试。
-- AppModule golden 与 seed corpus。
-- OpenAPI breaking check。
-- 参考 Provider conformance。
-- Lite 和 Server 启动 smoke。
-- govulncheck。
+- `make verify`。
+- PostgreSQL 18.4 Store integration 与 Server HTTP persistence smoke。
+- AppModule decode/compiler/record validation Fuzz seed、Canonical IR 与 Artifact golden。
+- Public/Admin HTTP 契约与 bootstrap admin 鉴权负例。
+
+OpenAPI breaking check、`govulncheck` 和供应链扫描仍需在 RC 前补齐。Provider conformance 不属于 alpha.2，因为当前没有 Provider Runtime。
 
 ### Nightly
 
 - 全包 race 和持续 Fuzz。
-- 所有已实现 Profile 的 E2E；planned Profile 只做静态定义和 fail-fast 检查。
+- Lite/Server E2E；planned Profile 只做静态定义和 fail-fast 检查。
 - PostgreSQL 所有受支持版本矩阵。
-- Provider sandbox 测试。
-- 进程中止、数据库短暂失败、消息重复等故障注入。
+- Provider sandbox、Outbox 重复和发布故障注入延后到 alpha.3 及后续。
+- alpha.2 可先覆盖进程中止与数据库短暂失败。
 - Benchmark 历史对比与小规模持续负载。
 
 ### Release
@@ -77,7 +83,7 @@ CI 额外用前一 Go 主版本运行 vet、test、build。当前仓库无外部
 - SBOM、许可证、漏洞、镜像最小权限和签名检查。
 - 容量测试、长稳测试和恢复演练报告。
 
-## 5. v0.1 高价值用例
+## 5. alpha.2 已验证的高价值用例
 
 - AppModule 相同输入产生稳定 IR 和 Hash。
 - 未知字段类型、重复字段、坏引用、依赖缺失、冲突和环全部拒绝。
@@ -85,34 +91,33 @@ CI 额外用前一 Go 主版本运行 vet、test、build。当前仓库无外部
 - Kernel 部分启动失败按逆序回滚。
 - Money 禁止跨币种运算和 int64 溢出。
 - ProjectContext 拒绝无效 Locale、Time Zone 和 Currency。
-- 发布事务不会产生“数据库已变更但活动 Revision 未记录”的中间态。
-- Outbox 与业务写入同事务，重复投递不重复执行效果。
-- fresh 数据库和 N-1 数据库都可迁移；重复启动无副作用。
-- Activate 失败后仍使用旧 Revision；进程重启恢复最后有效版本。
-- destructive schema change 默认拒绝。
+- fresh 数据库可迁移，重复执行 migration 无副作用。
 - Public/Admin 权限和 owner scope 不可互相绕过。
-- Provider 超时、限流、永久失败和可重试失败分类一致。
-- 同一 Idempotency Key 并发创建只产生一条 Record、Outbox 和外部效果。
-- Activate 与并发请求/Job 固定各自开始时的 Revision epoch。
-- Lite 不依赖外部服务可启动；Server 缺数据库时 readyz 失败而 healthz 仍成功。
+- 非空 sortable 声明和未允许的 Public 读取操作被拒绝。
+- Store 保持 Project/Module/Resource/Revision 边界、唯一值、引用完整性、乐观并发和软删除约束。
+- Server 重装配后仍可读取 PostgreSQL Record。
+- Lite 不依赖外部服务可启动；Server 缺少数据库、模块、Project ID 或管理员 Token 时 fail-fast。
+
+以下能力是 alpha.3 的测试目标，不是 alpha.2 已通过项：发布事务、Outbox、Activate/Rollback、Idempotency Key、副作用、Provider 错误分类、Revision epoch 和 N-1 Schema 升级。
 
 Webhook 签名与重放测试在第一个 callback 型 Provider Capability 进入范围时成为强制门禁；Console/SMTP Email 阶段不伪造这一覆盖。
 
 ## 6. Fuzz 与兼容测试
 
-当前 Fuzz target 保证任意 Descriptor 字符串输入不会导致 panic。alpha.2 增加：
+alpha.2 当前 Fuzz target 覆盖：
 
-- YAML/JSON 解码器。
-- Canonical IR 序列化器。
-- 模型迁移 diff。
-- 表达式和过滤器解析器。
-- HTTP 错误信封与分页 token。
+- Descriptor 校验不会 panic。
+- YAML/JSON 严格解码不会 panic。
+- Compiler 对相同输入产生确定 IR/Hash，且任意输入不会 panic。
+- Record JSON 解码和模型校验不会 panic。
+
+模型 migration diff、表达式引擎和发布兼容矩阵属于 alpha.3；当前只实现模型声明的标量等值过滤，不存在表达式 Runtime。
 
 Nightly 示例：
 
-    go test -run=^$ -fuzz=FuzzDescriptorValidate -fuzztime=10m ./internal/domain/appmodule
+    go test -run=^$ -fuzz=FuzzDescriptorValidateNeverPanics -fuzztime=10m ./internal/domain/appmodule
 
-AppModule 兼容矩阵至少覆盖：
+alpha.3 建立 AppModule 迁移兼容矩阵时至少覆盖：
 
 - 同 Schema 版本的旧模块在新 Core 上运行。
 - 新增可选字段和新 Resource 是兼容变更。
@@ -124,9 +129,9 @@ AppModule 兼容矩阵至少覆盖：
 首版不写一个缺少证据的“百万并发”数字。先建立可重复基准：
 
 - 模型 Validate/Compile 的耗时和分配。
-- Registry 激活和并发读取。
+- Catalog 查找和并发读取；Registry 激活延后到 alpha.3。
 - CRUD 热路径 p50/p95/p99。
-- Outbox 发布吞吐和积压恢复速度。
+- Outbox 发布吞吐和积压恢复速度在 alpha.3 引入 Outbox 后测试。
 - 每节点 CPU、内存、连接数和 GC。
 
 容量报告必须记录制品版本、模型 Hash、硬件、数据库规格、数据量、负载模型、错误率和延迟。扩容到数百节点时，以实测瓶颈决定缓存、队列、分区和服务拆分。

@@ -59,11 +59,11 @@ func TestDefinitionForReturnsDefensiveCopy(t *testing.T) {
 	}
 }
 
-func TestOnlyLiteIsImplementedInAlphaOne(t *testing.T) {
+func TestAlphaTwoImplementedProfiles(t *testing.T) {
 	t.Parallel()
 
 	for _, definition := range All() {
-		want := definition.Name == Lite
+		want := definition.Name == Lite || definition.Name == Server
 		if definition.Implemented != want {
 			t.Fatalf("profile %q implemented = %v, want %v", definition.Name, definition.Implemented, want)
 		}

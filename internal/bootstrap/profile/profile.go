@@ -81,6 +81,7 @@ var definitions = map[Name]Definition{
 		Roles:            []Role{RoleServer},
 		Features:         []Feature{FeatureAppModule},
 		RequiredServices: []string{"postgres"},
+		Implemented:      true,
 	},
 	Manager: {
 		Name:             Manager,

@@ -18,9 +18,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/shezw/panvara/internal/buildinfo"
 )
@@ -94,6 +97,34 @@ func TestOperationalEndpointsRejectOtherMethods(t *testing.T) {
 	}
 }
 
+func TestServerCombinesExternalHandlerWithoutShadowingOperations(t *testing.T) {
+	t.Parallel()
+
+	external := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/example" {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.WriteHeader(http.StatusAccepted)
+	})
+	server := NewWithHandler("127.0.0.1:0", staticStatus(true), buildinfo.Current(), external)
+
+	for _, test := range []struct {
+		path       string
+		wantStatus int
+	}{
+		{path: "/healthz", wantStatus: http.StatusOK},
+		{path: "/api/example", wantStatus: http.StatusAccepted},
+	} {
+		request := httptest.NewRequest(http.MethodGet, test.path, nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != test.wantStatus {
+			t.Fatalf("GET %s status = %d, want %d", test.path, response.Code, test.wantStatus)
+		}
+	}
+}
+
 func TestStartRejectsCanceledContextWithoutListening(t *testing.T) {
 	t.Parallel()
 
@@ -105,6 +136,58 @@ func TestStartRejectsCanceledContextWithoutListening(t *testing.T) {
 	}
 	if server.Addr() != "" {
 		t.Fatalf("server unexpectedly listened on %q", server.Addr())
+	}
+}
+
+func TestHTTPServerHasBoundedResourceDefaults(t *testing.T) {
+	t.Parallel()
+	configured := New("127.0.0.1:0", staticStatus(true), buildinfo.Current()).newHTTPServer()
+	if configured.ReadHeaderTimeout != defaultReadHeaderTimeout ||
+		configured.ReadTimeout != defaultReadTimeout ||
+		configured.WriteTimeout != defaultWriteTimeout ||
+		configured.IdleTimeout != defaultIdleTimeout ||
+		configured.MaxHeaderBytes != defaultMaxHeaderBytes {
+		t.Fatalf(
+			"HTTP limits = read-header:%s read:%s write:%s idle:%s headers:%d",
+			configured.ReadHeaderTimeout,
+			configured.ReadTimeout,
+			configured.WriteTimeout,
+			configured.IdleTimeout,
+			configured.MaxHeaderBytes,
+		)
+	}
+}
+
+func TestServerRealListenerStartServeStop(t *testing.T) {
+	t.Parallel()
+
+	server := New("127.0.0.1:0", staticStatus(true), buildinfo.Current())
+	if err := server.Start(context.Background()); err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			t.Skipf("environment forbids loopback listeners: %v", err)
+		}
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Get("http://" + server.Addr() + "/healthz")
+	if err != nil {
+		t.Fatalf("GET real listener: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := server.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	response, err = client.Get("http://" + server.Addr() + "/healthz")
+	if err == nil {
+		_ = response.Body.Close()
+		t.Fatal("listener still accepted requests after Stop")
 	}
 }
 
