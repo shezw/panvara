@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/modules/http-api.md    2026-07-14
+    docs/modules/http-api.md    2026-07-15
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -16,7 +16,7 @@
 
 ## 用途
 
-HTTP API 是 App、Website、后台或脚本访问 Panvara 的入口。alpha.2 提供匿名 Public Create、Bearer Token 保护的 Admin CRUD，以及运维和模块描述接口。本页说明 URL、认证、状态码与错误格式；业务旅程见 [CRM Leads](crm-leads.md)。
+HTTP API 是 App、Website、后台或脚本访问 Panvara 的入口。alpha.2 提供匿名 Public Create、Bearer Token 保护的 Admin CRUD，以及运维和模块描述接口；alpha.3a 开发切片增加不可变 Revision Registry 的 owner 只读接口。本页说明 URL、认证、状态码与错误格式；业务旅程见 [CRM Leads](crm-leads.md)。
 
 ## 当前状态
 
@@ -24,6 +24,8 @@ HTTP API 是 App、Website、后台或脚本访问 Panvara 的入口。alpha.2 �
 | --- | --- | --- |
 | 运维 | `GET /healthz`、`/readyz`、`/version` | 无 |
 | 模块生成物 | `GET /api/core/v1alpha1/modules/{module}/openapi.json`、`ui-schema.json` | 无 |
+| Revision List | `GET /api/admin/core/v1alpha1/modules/{module}/revisions` | Bearer Token |
+| Revision Detail/Source | `GET /api/admin/core/v1alpha1/modules/{module}/revisions/{revision}`、`.../{revision}/source` | Bearer Token |
 | Public Create | `POST /api/public/v1alpha1/{module}/{resource}` | 无 |
 | Admin List/Create | `GET/POST /api/admin/v1alpha1/{module}/{resource}` | Bearer Token |
 | Admin Get/Patch/Delete | `GET/PATCH/DELETE /api/admin/v1alpha1/{module}/{resource}/{id}` | Bearer Token |
@@ -35,6 +37,7 @@ HTTP API 是 App、Website、后台或脚本访问 Panvara 的入口。alpha.2 �
 - Lite 足以验收三个运维端点。
 - 业务 API 需要 Server、PostgreSQL 和已编译 AppModule。
 - Admin API 需要启动时使用的 `PANVARA_ADMIN_TOKEN`。
+- Registry API 还要求当前 Actor 是同一项目的 `project.owner`；接口不接受 Project 查询参数。
 - POST/PATCH 必须使用 `Content-Type: application/json`。
 - Patch/Delete 需要最近一次 Record 响应中的 ETag。
 
@@ -66,7 +69,7 @@ curl -i http://127.0.0.1:8080/api/admin/v1alpha1/crm.leads/organization \
 | `Content-Type: application/json` | POST、PATCH；其他类型返回 415 |
 | `If-Match: "2"` | PATCH、DELETE；必须是最新强数字 ETag |
 | `X-Request-ID` | 可选追踪 ID，合法值会在响应中回显 |
-| `If-None-Match` | 模块生成物缓存命中时返回 304 |
+| `If-None-Match` | 模块生成物或 Registry Source 缓存命中时返回 304 |
 
 Record 响应形态：
 
@@ -104,6 +107,50 @@ curl --get http://127.0.0.1:8080/api/admin/v1alpha1/crm.leads/lead \
   --data-urlencode 'limit=20'
 ```
 
+### Revision Registry 读取
+
+::: danger 登记不等于发布或激活
+Registry List 没有 active 语义。当前运行 Revision 必须从 OpenAPI 顶层 `x-panvara-revision` 读取，不能使用 `.data[0]`。
+:::
+
+Registry List 与 Record List 是两个不同契约。Registry List 只接受一个 `limit`（1–100，默认 20），不支持 cursor、filter 或其他查询参数：
+
+```sh
+curl -fsS \
+  'http://127.0.0.1:8080/api/admin/core/v1alpha1/modules/crm.leads/revisions?limit=100' \
+  -H "Authorization: Bearer $PANVARA_ADMIN_TOKEN"
+```
+
+List 的 `data` 元素与 Detail 都使用且仅使用以下字段：
+
+```json
+{
+  "module": "crm.leads",
+  "revision": "sha256:...",
+  "module_version": "1.0.0",
+  "data_schema_identities": [
+    {"format": 1, "fingerprint": "sha256:..."}
+  ],
+  "spec_version": "panvara.dev/v1alpha1",
+  "ir_format": 1,
+  "source_format": "yaml",
+  "source_hash": "sha256:...",
+  "origin": "bootstrap",
+  "registered_by": "system:bootstrap",
+  "registered_at": "2026-07-15T00:00:00Z"
+}
+```
+
+`data_schema_identities` 按 format 升序，每个 format 最多一项。消费者必须按 format 查找，例如：
+
+```sh
+jq -er '.data_schema_identities[] | select(.format == 1) | .fingerprint'
+```
+
+父 Module Revision 保存 Source、IR、生成物和首次登记信息；新投影算法可以追加新的 Data Schema Identity，但不能改变父 Revision Hash 或已有 format。List 与 Detail 使用 `Cache-Control: private, no-store`。
+
+Source 返回第一次登记的原始字节。YAML 使用 `application/yaml; charset=utf-8`，JSON 使用 `application/json; charset=utf-8`；强 ETag 精确为带双引号的 `source_hash`，并带 `Cache-Control: private, no-cache`。带相同 `If-None-Match` 时返回 304。
+
 ## 验收
 
 1. Lite 的三个运维端点分别返回 200。
@@ -114,6 +161,9 @@ curl --get http://127.0.0.1:8080/api/admin/v1alpha1/crm.leads/lead \
 6. 错误字段返回 422，并包含 `request_id`。
 7. Patch 不带 If-Match 返回 428；使用旧 ETag 返回 412。
 8. 未声明路径返回 404。
+9. Registry 不带 Token 返回 401；List/Detail/Source 正常读取；不存在的 Revision 返回 404。
+10. 对 Revision Detail 发送 DELETE 返回 405 且 `Allow: GET`。
+11. Registry List/Detail 返回 `private, no-store`；Source 返回 `private, no-cache`。
 
 ## 常见问题
 
@@ -128,6 +178,10 @@ curl --get http://127.0.0.1:8080/api/admin/v1alpha1/crm.leads/lead \
 ### 为什么能下载 UI Schema，却看不到网页？
 
 它是给未来 Manager 前端使用的 JSON 描述。alpha.2 没有 Manager Web 应用。
+
+### 怎样确认当前运行的是哪个 Registry Revision？
+
+读取 `/api/core/v1alpha1/modules/{module}/openapi.json` 的 `x-panvara-revision`，再按该值请求 Detail。不要假设 List 第一条是当前版本。
 
 ### 怎样定位失败请求？
 
@@ -145,9 +199,10 @@ curl --get http://127.0.0.1:8080/api/admin/v1alpha1/crm.leads/lead \
 - 没有 gRPC、GraphQL、批量 API 或流式响应。
 - Body 最大 256 KiB；请求 Header 最大 1 MiB。
 - 写超时 30 秒，不适合长任务。
+- Registry 只有 owner 只读 API，没有 cursor、写入 API、活动指针或发布状态。
 
 ## 兼容与升级
 
-客户端应以当前模块生成的 OpenAPI 为准。Source 改变后，生成物 ETag 与 `x-panvara-revision` 会变化，Record API 也会访问新 Revision 的独立数据 Scope。
+客户端应以当前模块生成的 OpenAPI 为准。完整 Canonical IR 改变后，生成物 ETag 与 `x-panvara-revision` 会变化，Record API 也会访问新 Revision 的独立数据 Scope。Registry 中同一 format 的 fingerprint 相同不会自动迁移或激活数据；客户端不能依赖 `data_schema_identities[0]`。
 
 正式版本前不承诺 v1alpha1 长期兼容；破坏性变更必须同时更新本指南、生成契约和验收测试。

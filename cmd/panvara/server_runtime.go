@@ -109,6 +109,19 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	if err := postgres.Migrate(ctx, pool); err != nil {
 		return nil, err
 	}
+	revisionStore, err := postgres.NewRevisionStore(pool)
+	if err != nil {
+		return nil, err
+	}
+	revisions, err := appmodule.NewRevisionRegistry(revisionStore, appmodule.SystemRevisionClock{})
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := revisions.RegisterBootstrap(
+		ctx, projectContext.ID(), module, source, format,
+	); err != nil {
+		return nil, fmt.Errorf("register bootstrap AppModule revision: %w", err)
+	}
 	store, err := postgres.NewStore(pool)
 	if err != nil {
 		return nil, err
@@ -122,7 +135,8 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 		return nil, err
 	}
 	router, err := httpapi.New(httpapi.Config{
-		Project: projectContext, PublicActor: publicActor, Module: module, Records: records, AdminAuth: auth,
+		Project: projectContext, PublicActor: publicActor, Module: module, Records: records,
+		Revisions: revisions, AdminAuth: auth,
 	})
 	if err != nil {
 		return nil, err

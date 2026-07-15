@@ -1,5 +1,5 @@
 # Panvara
-# Makefile    2026-07-14
+# Makefile    2026-07-15
 #
 # @link    : https://github.com/shezw/panvara
 # @author  : shezw
@@ -24,7 +24,7 @@ help:
 	@echo "  make verify            Run the Docker-free pull-request gate"
 	@echo "  make test-integration  Require PostgreSQL 18.4 integration tests"
 	@echo "  make test-server-smoke Require the Server HTTP persistence smoke test"
-	@echo "  make test-e2e          Run all required alpha.2 integration tests"
+	@echo "  make test-e2e          Run all required database and Server integration tests"
 	@echo "  make infra-up          Start local PostgreSQL"
 	@echo "  make infra-down        Stop local PostgreSQL"
 	@echo "  make docs-setup        Install locked documentation dependencies"

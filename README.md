@@ -1,6 +1,6 @@
 <!--
     Panvara
-    README.md    2026-07-14
+    README.md    2026-07-15
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -16,7 +16,7 @@
 
 Panvara 是面向中小开发团队的、数据模型驱动的可组合全栈框架。它希望用同一套 Core 构建 App、Website、管理后台和 E-commerce，并通过可替换 Provider 接入全球身份、支付、消息和存储能力。
 
-当前版本是 **v0.1.0-alpha.2**，已经形成“模型声明 → 编译与接口描述 → PostgreSQL CRUD → HTTP API”的最小闭环。它适合本地开发和架构验收，暂不适合直接承载生产业务。
+当前 Distribution 仍是 **v0.1.0-alpha.2**，已经形成“模型声明 → 编译与接口描述 → PostgreSQL CRUD → HTTP API”的最小闭环。当前开发分支另包含 **alpha.3a Revision Registry 开发切片**，用于不可变地登记启动模块；这不表示 alpha.3 发布生命周期已经完成。项目适合本地开发和架构验收，暂不适合直接承载生产业务。
 
 ## 快速开始
 
@@ -50,6 +50,8 @@ make run-server
 
 完整的创建组织、创建线索、查询和重启持久化步骤见 [CRM Leads 完整验收](docs/getting-started/crm-leads-acceptance.md)。
 
+继续验收启动 Revision 的不可变登记、Source 下载和重启幂等，请按 [Revision Registry 完整验收](docs/getting-started/revision-registry-acceptance.md)操作。
+
 ## 当前可以验收
 
 - 严格 YAML/JSON AppModule 和稳定的模型版本指纹。
@@ -58,8 +60,13 @@ make run-server
 - Public Create 与 Bearer Token 保护的 Admin CRUD。
 - 生成的 OpenAPI 3.1 与 Manager UI Schema。
 - Lite 与 Server 两种运行方式。
+- alpha.3a 开发切片：启动时登记不可变 Module Revision 父制品、可按算法追加的 Data Schema Identities、原始 Source 与生成物，并提供项目 owner 只读 API。
 
-Manager UI Schema 只是前端可消费的描述，尚未包含可视化 Manager。模块在线发布/回滚、完整身份、Provider、支付、Outbox、Worker 和分布式管理也仍在后续阶段。
+Manager UI Schema 只是前端可消费的描述，尚未包含可视化 Manager。模块在线发布/激活/回滚、完整身份、Provider、支付、Outbox、Worker 和分布式管理也仍在后续阶段。
+
+> **登记不等于发布或激活。** Registry List 不表达当前活动版本；当前运行 Revision 必须读取 OpenAPI 的 `x-panvara-revision`。alpha.3a 不改变 Record namespace，也没有 Publish、Activate、Rollback 或热切换 API。
+
+> **身份数组不是状态列表。** 每个 `data_schema_identities` 元素只是 `{format, fingerprint}`；新增投影算法可以给同一父 Revision 追加新 format，但已有身份和父 Revision 都不能改写。
 
 > alpha.2 数据提醒：修改模型会形成新的独立数据空间。旧数据仍保留，但不会自动迁移到新模型。请保存原模型和版本指纹，修改前备份数据库；覆盖模型文件不等于升级。
 
@@ -80,6 +87,8 @@ make docs-serve
 
 - [使用与验收 Guideline](docs/getting-started/index.md)
 - [模块指南](docs/modules/index.md)
+- [Revision Registry 指南](docs/modules/revision-registry.md)
+- [Revision Registry 完整验收](docs/getting-started/revision-registry-acceptance.md)
 - [命令参考](docs/reference/commands.md)
 - [配置参考](docs/reference/configuration.md)
 - [文档同步规范](docs/contributing/documentation.md)
@@ -87,6 +96,8 @@ make docs-serve
 - [总体架构](docs/arch.md)
 - [验证测试框架](docs/testing.md)
 - [Core v0 版本与边界](docs/core-v0.md)
+- [ADR-0001：模块与数据结构身份](docs/adr/0001-module-data-revision-identities.md)
+- [ADR-0002：不可变 Revision Registry](docs/adr/0002-immutable-revision-registry.md)
 
 ## License
 

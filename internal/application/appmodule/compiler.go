@@ -67,23 +67,30 @@ func (compiler *Compiler) CompileDocument(document spec.Document) (*CompiledModu
 	if err != nil {
 		return nil, fmt.Errorf("marshal OpenAPI: %w", err)
 	}
+	dataSchemaProjection, err := marshalDataSchemaProjection(canonicalDescriptor)
+	if err != nil {
+		return nil, fmt.Errorf("marshal appmodule data schema projection: %w", err)
+	}
+	dataSchemaFingerprint := fingerprintDataSchema(dataSchemaProjection)
 	return &CompiledModule{
-		descriptor:    canonicalDescriptor,
-		revisionHash:  revisionHash,
-		canonicalIR:   canonicalIR,
-		managerSchema: managerSchema,
-		openAPI:       openAPI,
+		descriptor:            canonicalDescriptor,
+		revisionHash:          revisionHash,
+		dataSchemaFingerprint: dataSchemaFingerprint,
+		canonicalIR:           canonicalIR,
+		managerSchema:         managerSchema,
+		openAPI:               openAPI,
 	}, nil
 }
 
 // CompiledModule is an immutable compilation result. Every byte or descriptor
 // accessor returns a defensive copy.
 type CompiledModule struct {
-	descriptor    domain.Descriptor
-	revisionHash  string
-	canonicalIR   []byte
-	managerSchema []byte
-	openAPI       []byte
+	descriptor            domain.Descriptor
+	revisionHash          string
+	dataSchemaFingerprint string
+	canonicalIR           []byte
+	managerSchema         []byte
+	openAPI               []byte
 }
 
 // Name returns the canonical module name.
@@ -99,6 +106,17 @@ func (module *CompiledModule) Version() string {
 // RevisionHash returns the sha256-prefixed canonical IR content hash.
 func (module *CompiledModule) RevisionHash() string {
 	return module.revisionHash
+}
+
+// DataSchemaFormat returns the canonical data-schema projection format.
+func (module *CompiledModule) DataSchemaFormat() int {
+	return DataSchemaFormatVersion
+}
+
+// DataSchemaFingerprint returns the content identity of persistence-affecting
+// resources and fields. It is not a Record namespace identity.
+func (module *CompiledModule) DataSchemaFingerprint() string {
+	return module.dataSchemaFingerprint
 }
 
 // Descriptor returns a deep copy of the canonical domain descriptor.

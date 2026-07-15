@@ -44,6 +44,12 @@ func (handler *Handler) writeApplicationError(writer http.ResponseWriter, reques
 		writeError(writer, request, http.StatusConflict, "already_exists", "record already exists", nil)
 	case errors.Is(err, record.ErrReferenced):
 		writeError(writer, request, http.StatusConflict, "record_referenced", "record is still referenced", nil)
+	case errors.Is(err, appmodule.ErrRevisionInvalid):
+		writeError(writer, request, http.StatusBadRequest, "invalid_revision_request", "module revision request is invalid", nil)
+	case errors.Is(err, appmodule.ErrRevisionForbidden):
+		writeError(writer, request, http.StatusForbidden, "forbidden", "project owner access is required", nil)
+	case errors.Is(err, appmodule.ErrRevisionNotFound):
+		writeError(writer, request, http.StatusNotFound, "revision_not_found", "module revision not found", nil)
 	case errors.Is(err, context.DeadlineExceeded):
 		writeError(writer, request, http.StatusGatewayTimeout, "deadline_exceeded", "request deadline exceeded", nil)
 	case errors.Is(err, context.Canceled):

@@ -14,6 +14,25 @@
       "acceptance": ["make test", "make docs-check"]
     },
     {
+      "id": "revision-registry",
+      "name": "Revision Registry",
+      "status": "alpha.3a development slice",
+      "sourcePaths": [
+        "internal/domain/appmodule/revision.go",
+        "internal/application/appmodule/revision_registry.go",
+        "internal/infrastructure/postgres/revision_store.go",
+        "internal/interfaces/httpapi/revision_handler.go",
+        "db/migrations/0002_module_revision_registry.sql"
+      ],
+      "guide": "docs/modules/revision-registry.md",
+      "acceptance": [
+        "make test",
+        "make test-integration",
+        "make test-server-smoke",
+        "make docs-check"
+      ]
+    },
+    {
       "id": "record-runtime",
       "name": "Record Runtime",
       "status": "alpha.2",

@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,31 @@ type integrationList struct {
 	NextCursor string              `json:"next_cursor"`
 }
 
+type integrationRevision struct {
+	Module               string                          `json:"module"`
+	Revision             string                          `json:"revision"`
+	DataSchemaIdentities []integrationDataSchemaIdentity `json:"data_schema_identities"`
+	SourceFormat         string                          `json:"source_format"`
+	SourceHash           string                          `json:"source_hash"`
+	Origin               string                          `json:"origin"`
+	RegisteredBy         string                          `json:"registered_by"`
+	RegisteredAt         time.Time                       `json:"registered_at"`
+}
+
+type integrationDataSchemaIdentity struct {
+	Format      int    `json:"format"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+type integrationRevisionList struct {
+	Data []integrationRevision `json:"data"`
+}
+
+type integrationRevisionSnapshot struct {
+	Metadata integrationRevision
+	Source   []byte
+}
+
 func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -72,6 +98,24 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	)
 	if artifact.Header.Get("ETag") == "" || !bytes.Contains(artifact.Body, []byte(`"openapi":"3.1.0"`)) {
 		t.Fatalf("OpenAPI response is incomplete: etag=%q body=%s", artifact.Header.Get("ETag"), artifact.Body)
+	}
+	var openAPI map[string]any
+	if err := json.Unmarshal(artifact.Body, &openAPI); err != nil {
+		t.Fatal(err)
+	}
+	runtimeRevision, _ := openAPI["x-panvara-revision"].(string)
+	if runtimeRevision == "" {
+		t.Fatalf("OpenAPI x-panvara-revision = %#v", openAPI["x-panvara-revision"])
+	}
+	initialRegistry := assertIntegrationRevisionRegistry(
+		t, client, baseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 1,
+	)
+	initialSource, err := os.ReadFile(config.moduleSource)
+	if err != nil {
+		t.Fatalf("read initial integration module source: %v", err)
+	}
+	if !bytes.Equal(initialRegistry.Source, initialSource) {
+		t.Fatal("bootstrap Registry source differs from the first module source bytes")
 	}
 	assertIntegrationStatus(
 		t, client, http.MethodGet,
@@ -132,13 +176,28 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	}
 
 	stopIntegrationServer(t, server, application)
-	application, server, baseURL = startIntegrationServer(t, ctx, config)
-	itemPath = baseURL + "/api/admin/v1alpha1/crm.leads/lead/" + lead.ID
-	restarted := assertIntegrationStatus(
-		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusOK, nil,
-	)
-	if got := decodeIntegrationRecord(t, restarted.Body).Data["stage"]; got != "qualified" {
-		t.Fatalf("stage after restart = %#v", got)
+	var restarted integrationResponse
+	for restart := 1; restart <= 3; restart++ {
+		application, server, baseURL = startIntegrationServer(t, ctx, config)
+		itemPath = baseURL + "/api/admin/v1alpha1/crm.leads/lead/" + lead.ID
+		restarted = assertIntegrationStatus(
+			t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusOK, nil,
+		)
+		if got := decodeIntegrationRecord(t, restarted.Body).Data["stage"]; got != "qualified" {
+			t.Fatalf("stage after restart %d = %#v", restart, got)
+		}
+		restartedRegistry := assertIntegrationRevisionRegistry(
+			t, client, baseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 1,
+		)
+		if restartedRegistry.Metadata.RegisteredAt != initialRegistry.Metadata.RegisteredAt ||
+			restartedRegistry.Metadata.SourceHash != initialRegistry.Metadata.SourceHash ||
+			integrationDataSchemaFingerprint(restartedRegistry.Metadata, 1) != integrationDataSchemaFingerprint(initialRegistry.Metadata, 1) ||
+			!bytes.Equal(restartedRegistry.Source, initialRegistry.Source) {
+			t.Fatalf("Registry bootstrap fact changed after restart %d: got %#v want %#v", restart, restartedRegistry, initialRegistry)
+		}
+		if restart < 3 {
+			stopIntegrationServer(t, server, application)
+		}
 	}
 
 	// A changed Source compiles to a new immutable revision namespace. The old
@@ -160,6 +219,12 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	changedConfig := config
 	changedConfig.moduleSource = changedPath
 	changedApplication, changedServer, changedBaseURL := startIntegrationServer(t, ctx, changedConfig)
+	changedRegistry := assertIntegrationRevisionRegistry(
+		t, client, changedBaseURL, testIntegrationAdminToken, "crm.leads", changedApplication.revision, 2,
+	)
+	if integrationDataSchemaFingerprint(changedRegistry.Metadata, 1) != integrationDataSchemaFingerprint(initialRegistry.Metadata, 1) {
+		t.Fatal("semantic version-only revision changed DataSchemaFingerprint")
+	}
 	changedItemPath := changedBaseURL + "/api/admin/v1alpha1/crm.leads/lead/" + lead.ID
 	assertIntegrationStatus(
 		t, client, http.MethodGet, changedItemPath, testIntegrationAdminToken, "", "", http.StatusNotFound, nil,
@@ -192,6 +257,13 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	if got := decodeIntegrationRecord(t, restarted.Body).Data["stage"]; got != "qualified" {
 		t.Fatalf("stage after returning to original revision = %#v", got)
 	}
+	returnedRegistry := assertIntegrationRevisionRegistry(
+		t, client, baseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 2,
+	)
+	if returnedRegistry.Metadata.RegisteredAt != initialRegistry.Metadata.RegisteredAt ||
+		returnedRegistry.Metadata.SourceHash != initialRegistry.Metadata.SourceHash {
+		t.Fatal("returning to original source replaced bootstrap Registry provenance")
+	}
 	deleted := assertIntegrationStatus(
 		t, client, http.MethodDelete, itemPath, testIntegrationAdminToken,
 		"", restarted.Header.Get("ETag"), http.StatusNoContent, nil,
@@ -203,6 +275,35 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusNotFound, nil,
 	)
 	stopIntegrationServer(t, server, application)
+
+	pool, err := panvarapg.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE panvara_module_revision DISABLE TRIGGER panvara_module_revision_immutable_rows`); err != nil {
+		pool.Close()
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE panvara_module_revision
+		SET canonical_ir_bytes = $4
+		WHERE project_id = $1 AND module_name = $2 AND revision_hash = $3
+	`, config.projectID, "crm.leads", runtimeRevision, []byte(`{"corrupt":true}`)); err != nil {
+		pool.Close()
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE panvara_module_revision ENABLE TRIGGER panvara_module_revision_immutable_rows`); err != nil {
+		pool.Close()
+		t.Fatal(err)
+	}
+	pool.Close()
+	corruptApplication, err := buildServerApplication(ctx, config)
+	if corruptApplication != nil {
+		corruptApplication.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "registry is corrupt") {
+		t.Fatalf("buildServerApplication(corrupt Registry) error = %v", err)
+	}
 }
 
 const testIntegrationAdminToken = "panvara-integration-admin-token-32-bytes"
@@ -264,6 +365,85 @@ func decodeIntegrationRecord(t *testing.T, body []byte) integrationRecord {
 		t.Fatalf("decode record %s: %v", body, err)
 	}
 	return result
+}
+
+func assertIntegrationRevisionRegistry(
+	t *testing.T,
+	client *http.Client,
+	baseURL string,
+	token string,
+	module string,
+	revision string,
+	wantCount int,
+) integrationRevisionSnapshot {
+	t.Helper()
+	listResponse := assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/admin/core/v1alpha1/modules/"+module+"/revisions?limit=100",
+		token, "", "", http.StatusOK, nil,
+	)
+	var list integrationRevisionList
+	if err := json.Unmarshal(listResponse.Body, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data) != wantCount {
+		t.Fatalf("Revision Registry count = %d, want %d: %s", len(list.Data), wantCount, listResponse.Body)
+	}
+	var metadata integrationRevision
+	for _, candidate := range list.Data {
+		if candidate.Revision == revision {
+			metadata = candidate
+			break
+		}
+	}
+	if metadata.Revision == "" || metadata.Module != module ||
+		integrationDataSchemaFingerprint(metadata, 1) == "" || metadata.SourceHash == "" ||
+		metadata.Origin != "bootstrap" || metadata.RegisteredBy != "system:bootstrap" ||
+		metadata.RegisteredAt.IsZero() {
+		t.Fatalf("Revision Registry metadata = %#v", metadata)
+	}
+	detailPath := baseURL + "/api/admin/core/v1alpha1/modules/" + module + "/revisions/" + revision
+	detailResponse := assertIntegrationStatus(
+		t, client, http.MethodGet, detailPath, token, "", "", http.StatusOK, nil,
+	)
+	var detail integrationRevision
+	if err := json.Unmarshal(detailResponse.Body, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(detail, metadata) {
+		t.Fatalf("Revision detail = %#v, want %#v", detail, metadata)
+	}
+	sourceResponse := assertIntegrationStatus(
+		t, client, http.MethodGet, detailPath+"/source", token, "", "", http.StatusOK, nil,
+	)
+	if sourceResponse.Header.Get("ETag") != `"`+metadata.SourceHash+`"` {
+		t.Fatalf("Revision source ETag = %q, want %q", sourceResponse.Header.Get("ETag"), `"`+metadata.SourceHash+`"`)
+	}
+	if sourceResponse.Header.Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("Revision source Cache-Control = %q", sourceResponse.Header.Get("Cache-Control"))
+	}
+	wantContentType := "application/yaml; charset=utf-8"
+	if metadata.SourceFormat == "json" {
+		wantContentType = "application/json; charset=utf-8"
+	}
+	if sourceResponse.Header.Get("Content-Type") != wantContentType {
+		t.Fatalf("Revision source Content-Type = %q, want %q", sourceResponse.Header.Get("Content-Type"), wantContentType)
+	}
+	return integrationRevisionSnapshot{Metadata: metadata, Source: sourceResponse.Body}
+}
+
+func integrationDataSchemaFingerprint(metadata integrationRevision, format int) string {
+	previous := 0
+	for _, identity := range metadata.DataSchemaIdentities {
+		if identity.Format <= previous || identity.Fingerprint == "" {
+			return ""
+		}
+		previous = identity.Format
+		if identity.Format == format {
+			return identity.Fingerprint
+		}
+	}
+	return ""
 }
 
 func startIntegrationServer(

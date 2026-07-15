@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/reference/configuration.md    2026-07-14
+    docs/reference/configuration.md    2026-07-15
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -53,6 +53,14 @@ set -a; . ./.env; . ./.env.local; set +a
 | `PANVARA_POSTGRES_PORT` | `5432` | PostgreSQL 宿主端口；冲突时可改为 `55432` |
 
 改变 PostgreSQL 端口时，必须同时修改 `PANVARA_DATABASE_URL` 中的端口。
+
+## Revision Registry
+
+alpha.3a Registry 开发切片不增加配置项。Server 在 migration 之后、对外就绪之前，使用当前 `PANVARA_PROJECT_ID`、`PANVARA_MODULE_SOURCE` 和 `PANVARA_MODULE_FORMAT` 进行幂等 bootstrap 登记；失败会阻止启动。
+
+`PANVARA_ADMIN_TOKEN` 只保护 Registry 读取接口。当前没有 active Revision、Publish、Activate 或 Rollback 配置，也不能用 Registry List 顺序配置运行版本。
+
+`data_schema_identities` 也不是配置项。它是 Panvara 为不可变父 Revision 计算并按 format 升序返回的派生身份数组；新增算法只能追加新的 format，用户不能通过环境变量覆盖 fingerprint。
 
 ## 测试变量
 

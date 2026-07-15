@@ -62,6 +62,7 @@ type Config struct {
 	PublicActor actor.Context
 	Module      Module
 	Records     RecordService
+	Revisions   RevisionRegistryService
 	AdminAuth   *BootstrapAdminAuth
 }
 
@@ -72,6 +73,7 @@ type Handler struct {
 	adminActor  actor.Context
 	module      Module
 	records     RecordService
+	revisions   RevisionRegistryService
 	resources   map[string]resourcePolicy
 	router      http.Handler
 }
@@ -101,7 +103,7 @@ func New(config Config) (*Handler, error) {
 
 	handler := &Handler{
 		project: config.Project, publicActor: config.PublicActor, adminActor: config.AdminAuth.actor,
-		module: config.Module, records: config.Records,
+		module: config.Module, records: config.Records, revisions: config.Revisions,
 		resources: makeResourcePolicies(config.Module.Descriptor()),
 	}
 	mux := http.NewServeMux()
@@ -111,6 +113,14 @@ func New(config Config) (*Handler, error) {
 	adminRecord := handler.withIdentity(record.SurfaceAdmin, http.HandlerFunc(handler.handleAdminRecord))
 	mux.Handle(adminDataPath, config.AdminAuth.Middleware(adminCollection))
 	mux.Handle(adminRecordPath, config.AdminAuth.Middleware(adminRecord))
+	if config.Revisions != nil {
+		revisionCollection := handler.withIdentity(record.SurfaceAdmin, http.HandlerFunc(handler.handleRevisionCollection))
+		revisionItem := handler.withIdentity(record.SurfaceAdmin, http.HandlerFunc(handler.handleRevisionItem))
+		revisionSource := handler.withIdentity(record.SurfaceAdmin, http.HandlerFunc(handler.handleRevisionSource))
+		mux.Handle(adminRevisionCollectionPath, config.AdminAuth.Middleware(revisionCollection))
+		mux.Handle(adminRevisionItemPath, config.AdminAuth.Middleware(revisionItem))
+		mux.Handle(adminRevisionSourcePath, config.AdminAuth.Middleware(revisionSource))
+	}
 	mux.HandleFunc("/", handler.handleNotFound)
 	handler.router = withRequestID(mux)
 	return handler, nil

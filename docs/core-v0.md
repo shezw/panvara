@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/core-v0.md    2026-07-14
+    docs/core-v0.md    2026-07-15
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -24,7 +24,7 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 - 单进程可以自然演进为 Server + Manager + Worker，而不重写领域规则。
 - 全球化原语从第一天进入模型，不等业务数据固化后再补。
 
-固定验证场景为 `crm-leads`。alpha.2 检查点只覆盖 Organization 与 Lead 的声明、编译、CRUD、Manager UI Schema 和 PostgreSQL 持久化；受控邮件事件与版本发布/回滚明确属于 alpha.3。身份 Account 不作为动态 Resource。
+固定验证场景为 `crm-leads`。alpha.2 检查点覆盖 Organization 与 Lead 的声明、编译、CRUD、Manager UI Schema 和 PostgreSQL 持久化；alpha.3a 开发切片只补充不可变 Revision 启动登记。受控邮件事件与完整发布/激活/回滚仍属于后续 alpha.3。身份 Account 不作为动态 Resource。
 
 ## 2. 版本路线
 
@@ -32,13 +32,14 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 | --- | --- | --- |
 | v0.1.0-alpha.1 | 启动内核、Profile、版本轴、ProjectContext、Money、AppModule 内存校验/注册、健康接口 | Lite 可启动；unit/race/vet/build 全绿 |
 | v0.1.0-alpha.2 | YAML/JSON 解码、v1alpha1 完整子集、Canonical IR、flex JSONB 存储、REST/OpenAPI、Manager UI Schema | crm-leads 可生成并完成持久化 CRUD |
+| alpha.3a 开发切片 | 可追加 Data Schema Identities、不可变 bootstrap Revision Registry、owner 只读查询与 Source 下载 | 重启幂等、首次 Source 保留、父/子事实拒绝改写、读取可复验；Distribution 仍为 alpha.2 |
 | v0.1.0-alpha.3 | Draft/Validate/Plan/Publish/Activate/Rollback、迁移计划、审计、Outbox、本地 Worker、Email Capability | 发布失败可恢复，活动 Revision 可回滚，副作用可追踪 |
 | v0.1.0-rc.1 | 协议冻结、升级兼容、参考 Provider、完整门禁和文档 | 无已知 P0/P1；N-1 升级通过 |
 | v0.1.0 | Core Preview | 参考纵向场景和发布工件可复现 |
 
 v0.1.0 是 Preview，不作“任意业务零代码生成”或“百万并发开箱即用”的生产承诺。
 
-## 3. 六条独立版本轴
+## 3. 七条独立版本轴
 
 | 版本轴 | alpha.2 当前值 | 规则 |
 | --- | --- | --- |
@@ -47,6 +48,7 @@ v0.1.0 是 Preview，不作“任意业务零代码生成”或“百万并发�
 | AppModule | panvara.dev/v1alpha1 | experimental；每个模块另有业务 SemVer 和 Revision Hash |
 | Provider API | provider.panvara.dev/v1alpha1 | planned；alpha.2 没有 Provider Runtime |
 | IR Format | 1 | experimental；当前为进程启动时编译的 Canonical IR |
+| Data Schema Format | 1 | experimental；Revision 下按 format 管理的独立数据结构投影身份，不是当前 Record namespace |
 | Database | 组件序列号 + checksum | 迁移不使用产品 SemVer |
 
 升级兼容必须明确比较每一轴，禁止仅凭 Distribution 版本推断模块或数据兼容。
@@ -64,7 +66,7 @@ v0.1.0 是 Preview，不作“任意业务零代码生成”或“百万并发�
 - Server：启动时从文件编译一个 AppModule、运行 migration 并装配 PostgreSQL；重启后 Record 保留。
 - 集成门禁：使用真实 PostgreSQL 18.4 验证 migration、Store 与 Server HTTP 持久化旅程。
 
-alpha.2 没有模块 Registry/发布状态。Server 每次启动都从指定 YAML/JSON 文件重新编译模块；Revision Hash 只是内容身份，不代表该 Revision 已发布或激活。
+alpha.2 Distribution 没有发布状态。当前 alpha.3a 开发切片会保存不可变 bootstrap Revision，但 Server 仍从指定 YAML/JSON 文件编译当前模块；Revision 登记只是一条启动事实，不代表已发布或激活。
 
 ### 4.1 alpha.2 持久化已知风险
 
@@ -76,11 +78,23 @@ alpha.3 的发布、迁移和回滚闭环完成前，任何持久化环境都必
 - 变更 Source 前备份数据库；需要保留数据时不要依赖重启自动迁移。
 - 先在可丢弃环境验证新 Revision，无法接受 Scope 切换时保持旧 Source。
 
-alpha.3 必须用 ADR 定案并验证：显式且幂等的数据迁移；迁移时保留 `record_id`；在目标 namespace 重建 unique/reference 约束；全部校验成功后原子 Activate；失败或回滚继续使用旧 namespace。同时必须决定 ModuleRevision 与 DataSchemaRevision 是继续绑定，还是分成独立版本轴，避免纯 UI/标签变化无意切换数据命名空间。
+alpha.3 必须用后续 ADR 定案并验证：显式且幂等的数据迁移；迁移时保留 `record_id`；在目标 namespace 重建 unique/reference 约束；全部校验成功后原子 Activate；失败或回滚继续使用旧 namespace。alpha.3a 已拆出按 format 选择的 Data Schema Identity，但尚未改变 Runtime namespace 或赋予它迁移决策语义。
+
+### 4.2 alpha.3a Revision Registry 开发切片
+
+- 编译器生成 Data Schema format 1 与稳定 fingerprint；SemVer、labels、Manager、API、Capability 和依赖不进入该投影。
+- Module Revision 是保存 Source/IR/生成物/首次 provenance 的不可变父事实；Data Schema Identity 是按 format 唯一的只追加子事实。
+- migration `0002` 建立项目隔离、追加式 Registry；数据库触发器对父/子表拒绝 UPDATE、DELETE、TRUNCATE，Store Port 不暴露修改方法。
+- Server 在 migration 后、HTTP/readiness 前登记当前 bootstrap Revision；同一 Revision 重启幂等并保留第一次 Source。
+- owner 只读 API 提供 List、Detail 和 Source；List/Detail 返回按 format 升序的 `data_schema_identities`，List 有界且没有 active 语义。
+- 启动登记、Detail 与 Source 会从保存 Source 重新编译并核对 IR/OpenAPI/Manager；不一致时 fail closed。List 使用不含大制品的有界元数据查询。
+- 当前 Record namespace、CRUD 与运行模块选择完全不变。
+
+具体身份和不可变约束见 [ADR-0001](adr/0001-module-data-revision-identities.md) 与 [ADR-0002](adr/0002-immutable-revision-registry.md)。
 
 ## 5. alpha.3 延后能力
 
-- Draft、Validate、Plan、Publish、Activate、Rollback 与不可变 Revision Registry。
+- Draft、Validate、Plan、Publish、Activate、Rollback 与活动版本状态机；不可变 Registry 基础已在 alpha.3a 建立。
 - Schema 变更计划、升级兼容检查和 last-known-good 恢复。
 - 审计、Transactional Outbox、进程内 Worker 和邮件副作用。
 - Provider Descriptor、Capability Resolution、Console/SMTP Email Adapter。
@@ -129,7 +143,7 @@ alpha.3 必须用 ADR 定案并验证：显式且幂等的数据迁移；迁移�
 - 动态 Action 只能调用白名单 Capability，并受超时、权限和幂等约束。
 - 分布式节点以 ProjectReleaseSnapshot + epoch 激活；请求、Job、Event 在执行期间固定 epoch。
 
-这些是不变式目标，不表示 alpha.2 已经存在发布器或回滚器。
+这些是不变式目标。alpha.3a 只验证“不可变登记事实”部分，不表示当前存在发布器、激活器或回滚器。
 
 ## 9. v0.1 完成定义
 

@@ -1,6 +1,6 @@
 /*
    Panvara
-   scripts/check-docs.mjs    2026-07-14
+   scripts/check-docs.mjs    2026-07-15
     ______     __  __     ______     ______     __     __
    /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
    \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -26,11 +26,14 @@ const requiredPages = [
   "docs/getting-started/local-environment.md",
   "docs/getting-started/build-and-lite.md",
   "docs/getting-started/crm-leads-acceptance.md",
+  "docs/getting-started/revision-registry-acceptance.md",
   "docs/getting-started/troubleshooting.md",
   "docs/reference/commands.md",
   "docs/reference/configuration.md",
   "docs/contributing/documentation.md",
   "docs/contributing/module-guide-template.md",
+  "docs/adr/0001-module-data-revision-identities.md",
+  "docs/adr/0002-immutable-revision-registry.md",
 ];
 
 const moduleHeadings = [

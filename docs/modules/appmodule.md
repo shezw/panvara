@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/modules/appmodule.md    2026-07-14
+    docs/modules/appmodule.md    2026-07-15
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -30,7 +30,11 @@ alpha.2 已实现：
 - 生成 OpenAPI 3.1 和 `manager.panvara.dev/v1alpha1` UI Schema。
 - 在 Server 启动时编译一个 AppModule，并让 Record Runtime 使用它。
 
-alpha.2 **没有**模块上传、草稿、发布、激活、回滚或在线编辑界面。每次启动都直接读取本地 Source 文件。
+当前 alpha.3a 开发切片还会生成 Data Schema Identity format 1，并在 Server 启动时把 Source、Canonical IR、OpenAPI 与 Manager UI Schema 登记为不可变父 Revision；数据结构身份作为可按 format 追加、不可覆盖的子事实保存。
+
+::: danger 登记不等于发布或激活
+Server 仍直接读取本地 Source 来决定当前 Runtime。Registry 没有模块上传、草稿、发布、激活、回滚或在线编辑界面，也不会改变 Record namespace。
+:::
 
 ## 前置条件
 
@@ -152,6 +156,16 @@ curl http://127.0.0.1:8080/api/core/v1alpha1/modules/demo.contacts/ui-schema.jso
 
 完整可运行示例见 [`examples/modules/crm-leads.yaml`](../../examples/modules/crm-leads.yaml)。机器可读 Schema 位于 [`internal/spec/appmodule/v1alpha1/schema.json`](../../internal/spec/appmodule/v1alpha1/schema.json)。
 
+### 三类内容身份
+
+- Module Revision：完整 Canonical IR 的指纹；当前仍用于 Record namespace。
+- Data Schema Identity：由 `format + fingerprint` 组成；当前 format 1 只投影 Resource、Field、引用、enum 与数据约束，不包含 SemVer、标签、Manager、API、Capability 或依赖。
+- Source Hash：原始 YAML/JSON 字节指纹；同一 Module Revision 可以由字节不同的等价 Source 产生。
+
+Registry 会把 Data Schema Identities 按 format 升序返回。新增投影算法可以给同一父 Revision 追加新 format，但不能改变父 Revision Hash 或覆盖已有身份。
+
+详细规则见 [ADR-0001](../adr/0001-module-data-revision-identities.md)。
+
 ## 验收
 
 按以下结果判断 AppModule 是否可用：
@@ -162,12 +176,13 @@ curl http://127.0.0.1:8080/api/core/v1alpha1/modules/demo.contacts/ui-schema.jso
 4. `ui-schema.json` 返回 HTTP 200，内容含资源、列表字段和表单字段。
 5. 使用相同 Source 重启时 Revision 不变。
 6. 输入未知字段、重复 YAML Key 或错误字段类型时，Server 应拒绝启动，而不是忽略错误。
+7. Server 模式下，当前 OpenAPI 的 Revision 可在 [Revision Registry](revision-registry.md) 中查到且恰好一条。
 
 ## 常见问题
 
 ### 为什么只改了标签，重启后看不到原来的数据？
 
-标签也会进入 Canonical IR。IR 改变会产生新 Revision，alpha.2 将它视为新的数据命名空间。
+标签会进入完整 Canonical IR，因此会产生新 Module Revision，当前 Runtime 仍将它视为新的数据命名空间。标签不进入 Data Schema format 1 投影，所以两个 Revision 的 format 1 fingerprint 可以保持相同；这不代表已经自动迁移或激活。
 
 ### YAML 和 JSON 可以混用吗？
 
@@ -193,11 +208,11 @@ alpha.2 的唯一索引使用有界 Canonical 值，必须提前限制长度；�
 - Public API 只支持 Create。
 - 不支持动态排序、Action、Event、审计、Provider 解析和模块热加载。
 - Manager 配置只产生 JSON Schema，没有可视化应用。
-- Source 改变后没有数据迁移或自动回滚。
+- 完整 Module Revision 改变后没有数据迁移或自动回滚；Registry 只保留事实。
 
 ## 兼容与升级
 
-`panvara.dev/v1alpha1` 是实验协议，不保证跨 alpha 版本无修改兼容。当前编译器只接受这个版本，也没有旧版本 Converter。
+`panvara.dev/v1alpha1`、IR Format 1 与 Data Schema Format 1 都是实验协议，不保证跨 alpha 版本无修改兼容。新的 Data Schema 算法必须使用新 format 并追加身份，不能重新解释 format 1。当前编译器只接受这个 AppModule 版本，也没有旧版本 Converter。
 
 alpha.2 升级模型时必须：
 
@@ -207,4 +222,4 @@ alpha.2 升级模型时必须：
 4. 在独立数据库或可丢弃项目 ID 下验证新模型。
 5. 需要旧数据时继续使用完全相同的旧 Source/Hash。
 
-Draft、Publish、Activate、Rollback 和数据迁移计划属于 alpha.3。
+alpha.3a 只完成不可变 bootstrap 登记。Draft、Publish、Activate、Rollback 和数据迁移计划仍属于后续 alpha.3 工作。

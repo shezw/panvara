@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/getting-started/index.md    2026-07-14
+    docs/getting-started/index.md    2026-07-15
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -26,6 +26,7 @@
 - CRM 模型会生成 API 和管理界面描述。
 - 你可以创建组织和销售线索，再把线索查询出来。
 - 停止并重新启动 Server 后，刚才的数据仍然存在。
+- 你可以验证启动 Revision 只登记一次，并下载第一次登记的原始 Source。
 
 ## 建议顺序
 
@@ -35,6 +36,7 @@
 | 2 | [创建本地环境](./local-environment) | 3 分钟 | `.env`、`.env.local` 已创建，PostgreSQL 为 healthy |
 | 3 | [编译并运行 Lite](./build-and-lite) | 3–8 分钟 | `/readyz` 返回 `ready` |
 | 4 | [CRM Leads 完整验收](./crm-leads-acceptance) | 8–15 分钟 | 重启后仍能查到新建线索 |
+| 5 | [Revision Registry 完整验收](./revision-registry-acceptance) | 10–15 分钟 | 重启后同一 Revision 仍恰好一条，format 1 身份可复核 |
 
 第一次下载 Go、Node 或 Docker 镜像的时间不计入表格，因为它取决于网络速度。
 
@@ -43,13 +45,17 @@
 | 名称 | 通俗解释 | 是否需要 Docker | 当前用途 |
 | --- | --- | --- | --- |
 | Lite | 只启动 Panvara 核心和健康接口 | 否 | 验证程序可以编译和运行 |
-| Server | 加载一个模型、连接数据库并开放业务 API | 是，或自备 PostgreSQL 18.4 | 验收 alpha.2 完整能力 |
+| Server | 加载一个模型、连接数据库并开放业务 API | 是，或自备 PostgreSQL 18.4 | 验收 alpha.2 与 alpha.3a Registry 开发切片 |
 
 文档中出现的 “Profile” 就是这里的“运行方式”。
 
 ## 验收边界
 
-当前 Manager 产物是供前端消费的 UI Schema JSON，并不是已经完成的可视化管理后台。支付、登录、邮件、模块在线发布、回滚和跨节点分布式管理也尚未实现；它们不能作为 alpha.2 的验收项。
+当前 Manager 产物是供前端消费的 UI Schema JSON，并不是已经完成的可视化管理后台。支付、登录、邮件、模块在线发布、激活、回滚和跨节点分布式管理也尚未实现；它们不能作为 alpha.2 或 alpha.3a Registry 开发切片的验收项。
+
+::: danger 登记不等于发布或激活
+alpha.3a 只登记 Server 启动时已经选择的模块。Registry 没有活动指针，不能通过 List 顺序判断当前版本；当前 Revision 以 OpenAPI 的 `x-panvara-revision` 为准。
+:::
 
 ::: danger 模型变更与数据
 alpha.2 会把每个模型版本放在独立数据空间。直接修改正在使用的模型文件后重启，旧数据不会被删除，但在新模型版本下会暂时看不到。完成发布与迁移能力前，请保存原模型文件并先备份数据库。

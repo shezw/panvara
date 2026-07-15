@@ -1,6 +1,6 @@
 /*
    Panvara
-   docs/.vitepress/config.mts    2026-07-14
+   docs/.vitepress/config.mts    2026-07-15
     ______     __  __     ______     ______     __     __
    /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
    \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -58,6 +58,7 @@ export default withMermaid(
             { text: "创建本地环境", link: "/getting-started/local-environment" },
             { text: "编译并运行 Lite", link: "/getting-started/build-and-lite" },
             { text: "CRM Leads 完整验收", link: "/getting-started/crm-leads-acceptance" },
+            { text: "Revision Registry 验收", link: "/getting-started/revision-registry-acceptance" },
             { text: "故障排查", link: "/getting-started/troubleshooting" },
           ],
         },
@@ -67,6 +68,7 @@ export default withMermaid(
             { text: "模块总览", link: "/modules/" },
             { text: "CRM Leads 示例", link: "/modules/crm-leads" },
             { text: "AppModule", link: "/modules/appmodule" },
+            { text: "Revision Registry", link: "/modules/revision-registry" },
             { text: "Record Runtime", link: "/modules/record-runtime" },
             { text: "HTTP API", link: "/modules/http-api" },
             { text: "运行模式", link: "/modules/runtime-profiles" },
@@ -89,6 +91,8 @@ export default withMermaid(
             { text: "验证测试框架", link: "/testing" },
             { text: "总体架构", link: "/arch" },
             { text: "Core v0 路线", link: "/core-v0" },
+            { text: "ADR-0001 身份拆分", link: "/adr/0001-module-data-revision-identities" },
+            { text: "ADR-0002 不可变 Registry", link: "/adr/0002-immutable-revision-registry" },
           ],
         },
       ],
