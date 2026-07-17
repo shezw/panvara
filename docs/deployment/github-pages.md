@@ -37,6 +37,13 @@ Panvara 的公开文档站地址是：
 
 完成后，推送文档相关文件会触发 `documentation-pages` 工作流。
 
+如果文档尚未进入 `main`，还需要打开 **Settings → Environments → github-pages**，在 **Deployment branches and tags** 中只添加需要发布的开发分支。Panvara 当前只允许：
+
+- `main`
+- `codex/alpha3b-draft-plan`
+
+不要使用允许所有分支的规则；这样普通功能分支无法覆盖公开文档站。
+
 ## 发布流程
 
 当前 alpha 开发阶段，工作流接受以下来源：
