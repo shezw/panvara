@@ -83,6 +83,21 @@ func TestValidateRecordSeparatesPatchPolicyFromCompleteValidation(t *testing.T) 
 	}
 }
 
+func TestValidateCompleteRecordRejectsNULStringsBeforePostgres(t *testing.T) {
+	t.Parallel()
+	module := allFieldKindsModule(t)
+	for field, value := range map[string]string{
+		"string_value": "text\x00value",
+		"email_value":  "ada\x00@example.com",
+	} {
+		_, err := module.ValidateCompleteRecord("item", map[string]any{field: value})
+		var validation *ValidationError
+		if !errors.As(err, &validation) || len(validation.Violations) != 1 || validation.Violations[0].Code != "invalid_value" {
+			t.Fatalf("ValidateCompleteRecord(%s NUL) error = %#v", field, err)
+		}
+	}
+}
+
 func TestValidateRecordRejectsUnknownSystemNullAndNonWritableFieldsDeterministically(t *testing.T) {
 	t.Parallel()
 

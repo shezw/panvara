@@ -94,14 +94,14 @@ Record Runtime 本身没有单独配置文件，它从 AppModule 和 Project Con
 
 | 类型 | 输入规则 | 保存前的处理 |
 | --- | --- | --- |
-| string/text | JSON 字符串 | 保留原值，按 `maxLength` 校验 Unicode 字符数 |
+| string/text | 不含 NUL（U+0000）的 JSON 字符串 | 保留原值，按 `maxLength` 校验 Unicode 字符数 |
 | int | JSON 整数 | 必须在有符号 64 位范围内 |
 | bool | `true`/`false` | 原样保存 |
 | decimal | JSON 字符串 | 移除无意义的末尾零，例如 `"12.3400"` 变为 `"12.34"` |
 | enum | JSON 字符串 | 必须在 `options` 中 |
 | date | `YYYY-MM-DD` | 严格检查日期 |
 | datetime | RFC 3339 字符串 | 转换为 UTC |
-| email | JSON 字符串 | 校验邮箱，并将域名部分转为小写 |
+| email | 不含 NUL（U+0000）的 JSON 字符串 | 校验邮箱，并将域名部分转为小写 |
 | money | `{"minor":整数,"currency":"USD"}` | 币种转为大写，不使用浮点金额 |
 | reference | UUIDv7 字符串 | 必须指向当前 Scope 中存在的目标记录 |
 

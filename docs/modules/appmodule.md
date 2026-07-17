@@ -121,6 +121,8 @@ curl http://127.0.0.1:8080/api/core/v1alpha1/modules/demo.contacts/ui-schema.jso
 | `spec.requires.capabilities` | 需要的能力 | 只进入 IR/Hash，alpha.2 不解析 Provider |
 | `spec.provides`、`conflicts` | 提供能力、冲突模块 | 已校验并进入 IR，当前不驱动运行期装配 |
 
+所有 module、resource 与 field label 值必须是 1–256 字节的有效 UTF-8，并且不能包含 NUL（U+0000）；JSON 的 `\u0000` 会先解码，因此同样会被模型校验拒绝。
+
 ### 字段类型
 
 | `type` | JSON 输入形态 | 示例 |

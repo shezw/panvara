@@ -33,6 +33,25 @@
       ]
     },
     {
+      "id": "draft-planning",
+      "name": "Draft Validation and Change Planning",
+      "status": "alpha.3b development slice",
+      "sourcePaths": [
+        "internal/domain/appmodule/draft.go",
+        "internal/application/appmodule",
+        "internal/infrastructure/postgres",
+        "internal/interfaces/httpapi",
+        "db/migrations"
+      ],
+      "guide": "docs/modules/draft-planning.md",
+      "acceptance": [
+        "make test",
+        "make test-integration",
+        "make test-server-smoke",
+        "make docs-check"
+      ]
+    },
+    {
       "id": "record-runtime",
       "name": "Record Runtime",
       "status": "alpha.2",

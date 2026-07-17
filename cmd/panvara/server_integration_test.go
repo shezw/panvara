@@ -77,6 +77,38 @@ type integrationRevisionSnapshot struct {
 	Source   []byte
 }
 
+type integrationDraft struct {
+	DraftID      string `json:"draft_id"`
+	DraftVersion uint64 `json:"draft_version"`
+	SourceHash   string `json:"source_hash"`
+}
+
+type integrationValidation struct {
+	ValidationID      string  `json:"validation_id"`
+	ValidationHash    string  `json:"validation_hash"`
+	DraftVersion      uint64  `json:"draft_version"`
+	Valid             bool    `json:"valid"`
+	CandidateRevision *string `json:"candidate_revision"`
+	Violations        []struct {
+		Code string `json:"code"`
+		Path string `json:"path"`
+	} `json:"violations"`
+}
+
+type integrationPlan struct {
+	PlanID       string `json:"plan_id"`
+	PlanHash     string `json:"plan_hash"`
+	ValidationID string `json:"validation_id"`
+	Effects      struct {
+		PlanRecorded       bool `json:"plan_recorded"`
+		RevisionRegistered bool `json:"revision_registered"`
+		Published          bool `json:"published"`
+		Activated          bool `json:"activated"`
+		RecordsMigrated    bool `json:"records_migrated"`
+		RuntimeChanged     bool `json:"runtime_changed"`
+	} `json:"effects"`
+}
+
 func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -117,10 +149,225 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	if !bytes.Equal(initialRegistry.Source, initialSource) {
 		t.Fatal("bootstrap Registry source differs from the first module source bytes")
 	}
+	draftBasePath := "/api/admin/core/v1alpha1/modules/crm.leads/drafts"
+	draftHeaders := http.Header{
+		"Content-Type":    []string{"application/yaml"},
+		"Idempotency-Key": []string{"server-e2e-invalid-draft"},
+	}
+	createdDraftResponse := assertIntegrationStatus(
+		t, client, http.MethodPost,
+		baseURL+draftBasePath+"?baseline_revision="+url.QueryEscape(runtimeRevision),
+		testIntegrationAdminToken, "spec: [", "", http.StatusCreated, draftHeaders,
+	)
+	var createdDraft integrationDraft
+	if err := json.Unmarshal(createdDraftResponse.Body, &createdDraft); err != nil {
+		t.Fatal(err)
+	}
+	if createdDraft.DraftID == "" || createdDraft.DraftVersion != 1 || createdDraftResponse.Header.Get("ETag") != `"1"` {
+		t.Fatalf("created Draft = %#v headers=%#v", createdDraft, createdDraftResponse.Header)
+	}
+	replayedDraftResponse := assertIntegrationStatus(
+		t, client, http.MethodPost,
+		baseURL+draftBasePath+"?baseline_revision="+url.QueryEscape(runtimeRevision),
+		testIntegrationAdminToken, "spec: [", "", http.StatusOK, draftHeaders,
+	)
+	var replayedDraft integrationDraft
+	if err := json.Unmarshal(replayedDraftResponse.Body, &replayedDraft); err != nil {
+		t.Fatal(err)
+	}
+	if replayedDraft.DraftID != createdDraft.DraftID || replayedDraft.SourceHash != createdDraft.SourceHash {
+		t.Fatalf("idempotent Draft replay = %#v, want %#v", replayedDraft, createdDraft)
+	}
+	draftItemPath := draftBasePath + "/" + createdDraft.DraftID
+	createdSourceResponse := assertIntegrationStatus(
+		t, client, http.MethodGet, baseURL+draftItemPath+"/source",
+		testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	if createdSourceResponse.Header.Get("ETag") != `"1"` ||
+		createdSourceResponse.Header.Get("X-Panvara-Source-Hash") != createdDraft.SourceHash ||
+		!bytes.Equal(createdSourceResponse.Body, []byte("spec: [")) {
+		t.Fatalf("created Draft Source = headers %#v body %q", createdSourceResponse.Header, createdSourceResponse.Body)
+	}
+	validationCollectionPath := draftItemPath + "/validations"
+	invalidValidationResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+validationCollectionPath,
+		testIntegrationAdminToken, "", `"1"`, http.StatusCreated, nil,
+	)
+	var invalidValidation integrationValidation
+	if err := json.Unmarshal(invalidValidationResponse.Body, &invalidValidation); err != nil {
+		t.Fatal(err)
+	}
+	if invalidValidation.Valid || invalidValidation.ValidationID == "" ||
+		invalidValidation.ValidationID != invalidValidation.ValidationHash || len(invalidValidation.Violations) == 0 {
+		t.Fatalf("invalid Draft validation = %#v", invalidValidation)
+	}
+	replayedValidationResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+validationCollectionPath,
+		testIntegrationAdminToken, "", `"1"`, http.StatusOK, nil,
+	)
+	var replayedValidation integrationValidation
+	if err := json.Unmarshal(replayedValidationResponse.Body, &replayedValidation); err != nil {
+		t.Fatal(err)
+	}
+	if replayedValidation.ValidationID != invalidValidation.ValidationID {
+		t.Fatalf("validation replay ID = %q, want %q", replayedValidation.ValidationID, invalidValidation.ValidationID)
+	}
+	validDraftSource := bytes.Replace(initialSource, []byte("version: 1.0.0"), []byte("version: 1.1.0"), 1)
+	if bytes.Equal(validDraftSource, initialSource) {
+		t.Fatal("Draft integration candidate version marker was not replaced")
+	}
+	replacedDraftResponse := assertIntegrationStatus(
+		t, client, http.MethodPut, baseURL+draftItemPath+"/source",
+		testIntegrationAdminToken, string(validDraftSource), `"1"`, http.StatusOK,
+		http.Header{"Content-Type": []string{"application/yaml"}},
+	)
+	var replacedDraft integrationDraft
+	if err := json.Unmarshal(replacedDraftResponse.Body, &replacedDraft); err != nil {
+		t.Fatal(err)
+	}
+	if replacedDraft.DraftVersion != 2 || replacedDraftResponse.Header.Get("ETag") != `"2"` {
+		t.Fatalf("replaced Draft = %#v headers=%#v", replacedDraft, replacedDraftResponse.Header)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+validationCollectionPath,
+		testIntegrationAdminToken, "", `"1"`, http.StatusPreconditionFailed, nil,
+	)
+	validValidationResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+validationCollectionPath,
+		testIntegrationAdminToken, "", `"2"`, http.StatusCreated, nil,
+	)
+	var validValidation integrationValidation
+	if err := json.Unmarshal(validValidationResponse.Body, &validValidation); err != nil {
+		t.Fatal(err)
+	}
+	if !validValidation.Valid || validValidation.CandidateRevision == nil || *validValidation.CandidateRevision == "" ||
+		len(validValidation.Violations) != 0 {
+		t.Fatalf("valid Draft validation = %#v", validValidation)
+	}
+	planCollectionPath := draftItemPath + "/plans"
+	planBody := fmt.Sprintf(`{"validation_id":%q}`, validValidation.ValidationID)
+	createdPlanResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+planCollectionPath,
+		testIntegrationAdminToken, planBody, `"2"`, http.StatusCreated, nil,
+	)
+	var createdPlan integrationPlan
+	if err := json.Unmarshal(createdPlanResponse.Body, &createdPlan); err != nil {
+		t.Fatal(err)
+	}
+	if createdPlan.PlanID == "" || createdPlan.PlanHash == "" || createdPlan.PlanID == createdPlan.PlanHash ||
+		createdPlan.ValidationID != validValidation.ValidationID || !createdPlan.Effects.PlanRecorded ||
+		createdPlan.Effects.RevisionRegistered || createdPlan.Effects.Published || createdPlan.Effects.Activated ||
+		createdPlan.Effects.RecordsMigrated || createdPlan.Effects.RuntimeChanged {
+		t.Fatalf("created change Plan = %#v", createdPlan)
+	}
+	replayedPlanResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+planCollectionPath,
+		testIntegrationAdminToken, planBody, `"2"`, http.StatusOK, nil,
+	)
+	var replayedPlan integrationPlan
+	if err := json.Unmarshal(replayedPlanResponse.Body, &replayedPlan); err != nil {
+		t.Fatal(err)
+	}
+	if replayedPlan.PlanID != createdPlan.PlanID || replayedPlan.PlanHash != createdPlan.PlanHash {
+		t.Fatalf("Plan replay = %#v, want %#v", replayedPlan, createdPlan)
+	}
+	equivalentSource := append([]byte("# semantically equivalent Draft generation\n"), validDraftSource...)
+	equivalentDraftResponse := assertIntegrationStatus(
+		t, client, http.MethodPut, baseURL+draftItemPath+"/source",
+		testIntegrationAdminToken, string(equivalentSource), `"2"`, http.StatusOK,
+		http.Header{"Content-Type": []string{"application/yaml"}},
+	)
+	var equivalentDraft integrationDraft
+	if err := json.Unmarshal(equivalentDraftResponse.Body, &equivalentDraft); err != nil {
+		t.Fatal(err)
+	}
+	if equivalentDraft.DraftVersion != 3 || equivalentDraft.SourceHash == replacedDraft.SourceHash ||
+		equivalentDraftResponse.Header.Get("ETag") != `"3"` {
+		t.Fatalf("equivalent Draft replacement = %#v headers=%#v", equivalentDraft, equivalentDraftResponse.Header)
+	}
+	equivalentValidationResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+validationCollectionPath,
+		testIntegrationAdminToken, "", `"3"`, http.StatusCreated, nil,
+	)
+	var equivalentValidation integrationValidation
+	if err := json.Unmarshal(equivalentValidationResponse.Body, &equivalentValidation); err != nil {
+		t.Fatal(err)
+	}
+	if !equivalentValidation.Valid || equivalentValidation.ValidationID == validValidation.ValidationID ||
+		equivalentValidation.CandidateRevision == nil || validValidation.CandidateRevision == nil ||
+		*equivalentValidation.CandidateRevision != *validValidation.CandidateRevision {
+		t.Fatalf("equivalent Draft validation = %#v, first=%#v", equivalentValidation, validValidation)
+	}
+	equivalentPlanBody := fmt.Sprintf(`{"validation_id":%q}`, equivalentValidation.ValidationID)
+	equivalentPlanResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+planCollectionPath,
+		testIntegrationAdminToken, equivalentPlanBody, `"3"`, http.StatusCreated, nil,
+	)
+	var equivalentPlan integrationPlan
+	if err := json.Unmarshal(equivalentPlanResponse.Body, &equivalentPlan); err != nil {
+		t.Fatal(err)
+	}
+	if equivalentPlan.PlanID == createdPlan.PlanID || equivalentPlan.PlanHash != createdPlan.PlanHash {
+		t.Fatalf("equivalent Draft plan = %#v, first=%#v", equivalentPlan, createdPlan)
+	}
+	equivalentPlanReplay := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+planCollectionPath,
+		testIntegrationAdminToken, equivalentPlanBody, `"3"`, http.StatusOK, nil,
+	)
+	var replayedEquivalentPlan integrationPlan
+	if err := json.Unmarshal(equivalentPlanReplay.Body, &replayedEquivalentPlan); err != nil {
+		t.Fatal(err)
+	}
+	if replayedEquivalentPlan.PlanID != equivalentPlan.PlanID || replayedEquivalentPlan.PlanHash != equivalentPlan.PlanHash {
+		t.Fatalf("equivalent Plan replay = %#v, want %#v", replayedEquivalentPlan, equivalentPlan)
+	}
+	escapedNULLabelSource := `{"apiVersion":"panvara.dev/v1alpha1","kind":"AppModule","metadata":{"name":"crm.leads","version":"1.0.0","labels":{"en-US":"Bad\u0000Label"}},"spec":{"resources":[]}}`
+	escapedNULCreate := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+draftBasePath+"?baseline_revision=none",
+		testIntegrationAdminToken, escapedNULLabelSource, "", http.StatusCreated,
+		http.Header{"Content-Type": []string{"application/json"}, "Idempotency-Key": []string{"server-e2e-escaped-nul-label"}},
+	)
+	var escapedNULDraft integrationDraft
+	if err := json.Unmarshal(escapedNULCreate.Body, &escapedNULDraft); err != nil {
+		t.Fatal(err)
+	}
+	escapedNULValidationResponse := assertIntegrationStatus(
+		t, client, http.MethodPost,
+		baseURL+draftBasePath+"/"+escapedNULDraft.DraftID+"/validations",
+		testIntegrationAdminToken, "", `"1"`, http.StatusCreated, nil,
+	)
+	var escapedNULValidation integrationValidation
+	if err := json.Unmarshal(escapedNULValidationResponse.Body, &escapedNULValidation); err != nil {
+		t.Fatal(err)
+	}
+	if escapedNULValidation.Valid || len(escapedNULValidation.Violations) == 0 {
+		t.Fatalf("escaped NUL label validation = %#v", escapedNULValidation)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/admin/core/v1alpha1/modules/crm.leads/revisions/"+url.PathEscape(*validValidation.CandidateRevision),
+		testIntegrationAdminToken, "", "", http.StatusNotFound, nil,
+	)
+	unchangedArtifact := assertIntegrationStatus(
+		t, client, http.MethodGet, baseURL+"/api/core/v1alpha1/modules/crm.leads/openapi.json",
+		"", "", "", http.StatusOK, nil,
+	)
+	var unchangedOpenAPI map[string]any
+	if err := json.Unmarshal(unchangedArtifact.Body, &unchangedOpenAPI); err != nil {
+		t.Fatal(err)
+	}
+	if unchangedOpenAPI["x-panvara-revision"] != runtimeRevision {
+		t.Fatalf("runtime Revision changed after Plan: %#v", unchangedOpenAPI["x-panvara-revision"])
+	}
 	assertIntegrationStatus(
 		t, client, http.MethodGet,
 		baseURL+"/api/core/v1alpha1/modules/crm.leads/ui-schema.json",
 		"", "", "", http.StatusOK, nil,
+	)
+	assertIntegrationStatus(
+		t, client, http.MethodPost,
+		baseURL+"/api/admin/v1alpha1/crm.leads/organization",
+		testIntegrationAdminToken, `{"name":"Unsafe\u0000Organization"}`, "", http.StatusUnprocessableEntity, nil,
 	)
 
 	organizationResponse := assertIntegrationStatus(
@@ -185,6 +432,34 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		)
 		if got := decodeIntegrationRecord(t, restarted.Body).Data["stage"]; got != "qualified" {
 			t.Fatalf("stage after restart %d = %#v", restart, got)
+		}
+		if restart == 1 {
+			persistedDraft := assertIntegrationStatus(
+				t, client, http.MethodGet, baseURL+draftItemPath,
+				testIntegrationAdminToken, "", "", http.StatusOK, nil,
+			)
+			var draftAfterRestart integrationDraft
+			if err := json.Unmarshal(persistedDraft.Body, &draftAfterRestart); err != nil {
+				t.Fatal(err)
+			}
+			if draftAfterRestart.DraftVersion != 3 || draftAfterRestart.SourceHash != equivalentDraft.SourceHash {
+				t.Fatalf("Draft after restart = %#v, want %#v", draftAfterRestart, equivalentDraft)
+			}
+			assertIntegrationStatus(
+				t, client, http.MethodGet,
+				baseURL+validationCollectionPath+"/"+url.PathEscape(validValidation.ValidationID),
+				testIntegrationAdminToken, "", "", http.StatusOK, nil,
+			)
+			assertIntegrationStatus(
+				t, client, http.MethodGet,
+				baseURL+planCollectionPath+"/"+url.PathEscape(createdPlan.PlanID),
+				testIntegrationAdminToken, "", "", http.StatusOK, nil,
+			)
+			assertIntegrationStatus(
+				t, client, http.MethodGet,
+				baseURL+planCollectionPath+"/"+url.PathEscape(equivalentPlan.PlanID),
+				testIntegrationAdminToken, "", "", http.StatusOK, nil,
+			)
 		}
 		restartedRegistry := assertIntegrationRevisionRegistry(
 			t, client, baseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 1,
@@ -329,7 +604,7 @@ func assertIntegrationStatus(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body != "" {
+	if body != "" && headers.Get("Content-Type") == "" {
 		request.Header.Set("Content-Type", "application/json")
 	}
 	if token != "" {

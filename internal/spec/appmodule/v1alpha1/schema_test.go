@@ -38,6 +38,18 @@ func TestAuthoringSchemaIsValidJSONAndMatchesEnvelopeConstants(t *testing.T) {
 	if additional, ok := schema["additionalProperties"].(bool); !ok || additional {
 		t.Fatal("root schema must reject additional properties")
 	}
+	definitions, ok := schema["$defs"].(map[string]any)
+	if !ok {
+		t.Fatal("schema definitions are missing")
+	}
+	labels, ok := definitions["labels"].(map[string]any)
+	if !ok {
+		t.Fatal("labels definition is missing")
+	}
+	labelValues, ok := labels["additionalProperties"].(map[string]any)
+	if !ok || labelValues["pattern"] != `^[^\u0000]*$` {
+		t.Fatalf("label value NUL exclusion = %#v", labelValues["pattern"])
+	}
 	first := AuthoringSchema()
 	first[0] = '!'
 	if AuthoringSchema()[0] == '!' {

@@ -26,7 +26,7 @@ Revision Registry 保存每个项目中已成功编译的 AppModule Source、Can
 
 该能力是 **alpha.3a 开发切片**；Panvara Distribution 仍为 `v0.1.0-alpha.2`。
 
-当前已实现：Server 启动登记、PostgreSQL 追加式存储、项目 owner 只读 API、Source 下载与 ETag，以及 Detail/Source 读取时重新编译校验。List 只读取有界元数据，不加载 Source 或生成物。当前没有 Draft、Publish、Activate、Rollback、活动版本指针或运行时热切换。
+当前已实现：Server 启动登记、PostgreSQL 追加式存储、项目 owner 只读 API、Source 下载与 ETag，以及 Detail/Source 读取时重新编译校验。List 只读取有界元数据，不加载 Source 或生成物。alpha.3b 的 Draft/Validation/Plan 是引用 Registry Baseline 的独立控制面，不会修改 Registry；Publish、Activate、Rollback、活动版本指针和运行时热切换仍不存在。
 
 ## 前置条件
 
@@ -109,10 +109,11 @@ Detail 与 Source 会重新编译保存的 Source 并核对所有制品。持久
 - List 没有 cursor，单次最多 100 条。
 - 完整制品存放于 PostgreSQL，尚未外置到对象存储。
 - 不提供更新、删除、发布、激活、回滚和热加载。
+- alpha.3b Candidate 只有 Validation 身份，不会因为生成 Plan 自动进入 Registry。
 - Registry 不改变 Record namespace；当前仍由完整 Module Revision 隔离数据。
 
 ## 兼容与升级
 
 Registry 表由 forward-only 数据库迁移创建，父 Revision 与子 Data Schema Identity 都不得直接 UPDATE、DELETE 或 TRUNCATE。Module Revision、按 format 选择的 Data Schema Identity、Source Hash 和各自格式号是不同版本轴，升级时必须分别比较。
 
-alpha.3a 是开发切片，不提升 Distribution 版本，也不表示 alpha.3 发布生命周期已经完成。后续 Publish/Activate 设计必须引用 [身份拆分 ADR](../adr/0001-module-data-revision-identities.md) 与 [不可变 Registry ADR](../adr/0002-immutable-revision-registry.md)，并保持现有事实可验证、不可改写。
+alpha.3a/alpha.3b 是开发切片，不提升 Distribution 版本，也不表示 alpha.3 发布生命周期已经完成。Draft Planning 还必须遵守 [ADR-0003](../adr/0003-draft-validation-change-plan.md)；后续 Publish/Activate 设计必须引用三份 ADR，并保持现有事实可验证、不可改写。

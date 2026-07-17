@@ -57,9 +57,9 @@ Valkey、NATS、MinIO 和 OpenTelemetry Collector 只有在对应 Port/Adapter �
 
 ## 3. 首次启动 Lite
 
-alpha.2 合并到默认分支前，从验收分支克隆；合并后可以省略 `--branch`：
+当前 alpha.3b 开发切片合并到默认分支前，从对应验收分支克隆；合并后可以省略 `--branch`：
 
-    git clone --branch codex/alpha2-model-runtime --single-branch https://github.com/shezw/panvara.git
+    git clone --branch codex/alpha3b-draft-plan --single-branch https://github.com/shezw/panvara.git
     cd panvara
     make doctor
     make verify
@@ -100,6 +100,7 @@ alpha.2 合并到默认分支前，从验收分支克隆；合并后可以省略
 
 Compose 端口只绑定 127.0.0.1，开发密码只用于本机；生产配置不得复用。
 PostgreSQL 18 官方镜像把持久化根目录改为 /var/lib/postgresql，Compose 已按 18+ 规则挂载，不能沿用 17 及以下的 /var/lib/postgresql/data。
+所有本地、测试和自备 PostgreSQL 数据库还必须使用 UTF8 `server_encoding`；可以用 `SHOW server_encoding;` 验证。非 UTF8 数据库可能拒绝多语言 Source、标签或生成制品。当前启动/Migrate 尚未自动 fail-fast 检查这一条件，接入外部数据库时由开发者或运维先行确认。
 
 Panvara 不隐式加载 `.env`。需要覆盖默认值时，通过 Shell、IDE 或可信的环境管理器显式导出 `.env` 与 `.env.local`；仓库中的 `.env.example` 故意不给管理员 Token 设置可用默认值。
 多个 clone/worktree 并行开发时，为 PANVARA_COMPOSE_PROJECT 和 PANVARA_POSTGRES_PORT 设置不同值，避免共用容器、数据卷或宿主端口。

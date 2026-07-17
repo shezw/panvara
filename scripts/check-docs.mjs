@@ -27,13 +27,16 @@ const requiredPages = [
   "docs/getting-started/build-and-lite.md",
   "docs/getting-started/crm-leads-acceptance.md",
   "docs/getting-started/revision-registry-acceptance.md",
+  "docs/getting-started/draft-plan-acceptance.md",
   "docs/getting-started/troubleshooting.md",
+  "docs/development.md",
   "docs/reference/commands.md",
   "docs/reference/configuration.md",
   "docs/contributing/documentation.md",
   "docs/contributing/module-guide-template.md",
   "docs/adr/0001-module-data-revision-identities.md",
   "docs/adr/0002-immutable-revision-registry.md",
+  "docs/adr/0003-draft-validation-change-plan.md",
 ];
 
 const moduleHeadings = [
@@ -62,6 +65,23 @@ function requirePath(relativePath, kind = "路径") {
 
 for (const page of requiredPages) {
   requirePath(page, "基础文档");
+}
+
+const checkoutGuides = [
+  "docs/getting-started/local-environment.md",
+  "docs/development.md",
+];
+for (const guidePath of checkoutGuides) {
+  if (!fs.existsSync(absolute(guidePath))) {
+    continue;
+  }
+  const guide = fs.readFileSync(absolute(guidePath), "utf8");
+  if (guide.includes("codex/alpha2-model-runtime")) {
+    failures.push(`本地开发指南仍引用已过期的 alpha.2 分支: ${guidePath}`);
+  }
+  if (!guide.includes("codex/alpha3b-draft-plan")) {
+    failures.push(`本地开发指南缺少当前 alpha.3b 验收分支: ${guidePath}`);
+  }
 }
 
 const manifestPath = "docs/_meta/modules.json";
@@ -139,6 +159,53 @@ for (const source of mappedSources) {
   requirePath(source, "已登记的示例 AppModule");
 }
 
+const draftFixturePaths = {
+  invalid: "examples/drafts/crm-leads-invalid.yaml",
+  valid: "examples/drafts/crm-leads-valid.yaml",
+};
+for (const fixture of Object.values(draftFixturePaths)) {
+  requirePath(fixture, "Draft Golden Path Fixture");
+}
+
+if (Object.values(draftFixturePaths).every((fixture) => fs.existsSync(absolute(fixture)))) {
+  const invalidFixture = fs.readFileSync(absolute(draftFixturePaths.invalid), "utf8");
+  const validFixture = fs.readFileSync(absolute(draftFixturePaths.valid), "utf8");
+  if (!invalidFixture.includes("version: 1.0.0") ||
+      !invalidFixture.includes("options: [new, qualified, won, won]")) {
+    failures.push("无效 Draft Fixture 必须稳定包含重复 enum option");
+  }
+  if (!validFixture.includes("version: 1.1.0") ||
+      !validFixture.includes("options: [new, contacted, qualified, won]")) {
+    failures.push("有效 Draft Fixture 必须稳定包含 1.1.0 与新增 contacted option");
+  }
+}
+
+const draftAcceptancePath = "docs/getting-started/draft-plan-acceptance.md";
+if (fs.existsSync(absolute(draftAcceptancePath))) {
+  const acceptance = fs.readFileSync(absolute(draftAcceptancePath), "utf8");
+  const requiredFragments = [
+    "baseline_revision=", "Idempotency-Key", "--data-binary @examples/drafts/",
+    ".draft_id", ".draft_version", ".validation_id", ".validation_format",
+    ".candidate_revision", ".data_schema_identities", ".violations",
+    ".plan_id", ".plan_format", ".summary.classification",
+    ".migration_execution_supported", "X-Panvara-Source-Hash",
+  ];
+  for (const fragment of requiredFragments) {
+    if (!acceptance.includes(fragment)) {
+      failures.push(`Draft Golden Path 缺少实际 HTTP 契约片段: ${fragment}`);
+    }
+  }
+  const retiredFragments = [
+    ".draft_generation", ".format_version", ".issues_hash",
+    ".candidate.revision_hash", ".risk_summary", "jq -er '.id'",
+  ];
+  for (const fragment of retiredFragments) {
+    if (acceptance.includes(fragment)) {
+      failures.push(`Draft Golden Path 仍使用已废弃的 HTTP 字段: ${fragment}`);
+    }
+  }
+}
+
 finish();
 
 function finish() {
@@ -150,7 +217,7 @@ function finish() {
     process.exit(1);
   }
   console.log(
-    `Panvara 文档约束检查通过：${manifest.modules.length} 个模块指南，${exampleSources.length} 个示例 AppModule。`,
+    `Panvara 文档约束检查通过：${manifest.modules.length} 个模块指南，${exampleSources.length} 个示例 AppModule，${Object.keys(draftFixturePaths).length} 个 Draft Fixture。`,
   );
   process.exit(0);
 }

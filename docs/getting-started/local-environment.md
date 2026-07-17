@@ -18,14 +18,14 @@
 
 ## 1. 下载当前开发版
 
-alpha.2 尚未合并到默认分支时，使用验收分支：
+当前 alpha.3b 开发切片尚未合并到默认分支。要验收本套文档中的 Registry、Draft、Validation 与 Change Plan，请使用对应验收分支：
 
 ```sh
-git clone --branch codex/alpha2-model-runtime --single-branch https://github.com/shezw/panvara.git
+git clone --branch codex/alpha3b-draft-plan --single-branch https://github.com/shezw/panvara.git
 cd panvara
 ```
 
-alpha.2 合并到 `main` 后，改用普通克隆：
+alpha.3b 合并到 `main` 后，才改用普通克隆：
 
 ```sh
 git clone https://github.com/shezw/panvara.git

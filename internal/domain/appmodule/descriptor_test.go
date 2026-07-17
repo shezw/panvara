@@ -38,6 +38,16 @@ func TestDescriptorValidateAcceptsSemVerPrereleaseAndBuild(t *testing.T) {
 	}
 }
 
+func TestDescriptorValidateRejectsNULInDecodedLabel(t *testing.T) {
+	t.Parallel()
+	descriptor := validDescriptor("crm.leads")
+	descriptor.Labels = map[string]string{}
+	descriptor.Labels["en-US"] = "CRM\x00Leads"
+	if err := descriptor.Validate(); err == nil {
+		t.Fatal("Validate(NUL label) error = nil")
+	}
+}
+
 func TestDescriptorValidateRejectsUnsafeOrAmbiguousModels(t *testing.T) {
 	t.Parallel()
 

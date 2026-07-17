@@ -24,7 +24,7 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 - 单进程可以自然演进为 Server + Manager + Worker，而不重写领域规则。
 - 全球化原语从第一天进入模型，不等业务数据固化后再补。
 
-固定验证场景为 `crm-leads`。alpha.2 检查点覆盖 Organization 与 Lead 的声明、编译、CRUD、Manager UI Schema 和 PostgreSQL 持久化；alpha.3a 开发切片只补充不可变 Revision 启动登记。受控邮件事件与完整发布/激活/回滚仍属于后续 alpha.3。身份 Account 不作为动态 Resource。
+固定验证场景为 `crm-leads`。alpha.2 检查点覆盖 Organization 与 Lead 的声明、编译、CRUD、Manager UI Schema 和 PostgreSQL 持久化；alpha.3a 补充不可变 Revision 启动登记；alpha.3b 补充 raw Source Draft、Validation 与 Change Plan。受控邮件事件与完整 Publish/Activate/Rollback 仍属于后续 alpha.3。身份 Account 不作为动态 Resource。
 
 ## 2. 版本路线
 
@@ -33,6 +33,7 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 | v0.1.0-alpha.1 | 启动内核、Profile、版本轴、ProjectContext、Money、AppModule 内存校验/注册、健康接口 | Lite 可启动；unit/race/vet/build 全绿 |
 | v0.1.0-alpha.2 | YAML/JSON 解码、v1alpha1 完整子集、Canonical IR、flex JSONB 存储、REST/OpenAPI、Manager UI Schema | crm-leads 可生成并完成持久化 CRUD |
 | alpha.3a 开发切片 | 可追加 Data Schema Identities、不可变 bootstrap Revision Registry、owner 只读查询与 Source 下载 | 重启幂等、首次 Source 保留、父/子事实拒绝改写、读取可复验；Distribution 仍为 alpha.2 |
+| alpha.3b 开发切片 | 版本化 Draft、raw Source Replace、Validation、Change Plan、创建幂等与 ETag 并发保护 | invalid → replace → valid → plan 可复现，Candidate/Runtime/Record 均不改变；Distribution 仍为 alpha.2 |
 | v0.1.0-alpha.3 | Draft/Validate/Plan/Publish/Activate/Rollback、迁移计划、审计、Outbox、本地 Worker、Email Capability | 发布失败可恢复，活动 Revision 可回滚，副作用可追踪 |
 | v0.1.0-rc.1 | 协议冻结、升级兼容、参考 Provider、完整门禁和文档 | 无已知 P0/P1；N-1 升级通过 |
 | v0.1.0 | Core Preview | 参考纵向场景和发布工件可复现 |
@@ -66,7 +67,7 @@ v0.1.0 是 Preview，不作“任意业务零代码生成”或“百万并发�
 - Server：启动时从文件编译一个 AppModule、运行 migration 并装配 PostgreSQL；重启后 Record 保留。
 - 集成门禁：使用真实 PostgreSQL 18.4 验证 migration、Store 与 Server HTTP 持久化旅程。
 
-alpha.2 Distribution 没有发布状态。当前 alpha.3a 开发切片会保存不可变 bootstrap Revision，但 Server 仍从指定 YAML/JSON 文件编译当前模块；Revision 登记只是一条启动事实，不代表已发布或激活。
+alpha.2 Distribution 没有发布状态。alpha.3a 会保存不可变 bootstrap Revision；alpha.3b 会保存 Draft、Validation 和 Change Plan，但 Server 仍从指定 YAML/JSON 文件编译当前模块。这些事实都不代表已发布或激活。
 
 ### 4.1 alpha.2 持久化已知风险
 
@@ -92,15 +93,28 @@ alpha.3 必须用后续 ADR 定案并验证：显式且幂等的数据迁移；�
 
 具体身份和不可变约束见 [ADR-0001](adr/0001-module-data-revision-identities.md) 与 [ADR-0002](adr/0002-immutable-revision-registry.md)。
 
+### 4.3 alpha.3b Draft、Validation 与 Change Plan 开发切片
+
+- Draft 在 Project/Module 内使用 UUIDv7，创建时显式固定精确 Baseline 或 `none`；Module 与 Baseline 创建后不可变。
+- Create/Replace 的 Body 是最多 1 MiB 的 raw YAML/JSON；保存只校验 Content-Type、NUL-free UTF-8 与大小，允许作者模型暂时无效。
+- Source 每次实质覆盖使内部 `generation`（HTTP `draft_version`）单调递增；Draft 元数据强 ETag 用于 CAS，相同格式和字节重放是 no-op。
+- Create Draft 使用持久化 Idempotency Key；同 Key/同请求返回原 Draft，同 Key/异请求冲突。
+- Validation 绑定精确 Draft Version 与 Source Hash；invalid 是带结构化 `violations` 的成功事实，valid 才产生 Candidate 身份，但不会登记 Candidate。
+- Plan 绑定当前 Draft Version 中有效 Validation，稳定解释 Baseline 与 Candidate 变化，并明确迁移执行不受支持。
+- Validation/Plan 重放返回同一不可变事实；后续 Draft Version 只让旧结果变 stale，不删除或改写它们。
+- 所有 Validation/Plan effects 明确未登记、未发布、未激活、未迁移、未切换 Runtime。
+
+具体约束和被拒绝方案见 [ADR-0003](adr/0003-draft-validation-change-plan.md)。
+
 ## 5. alpha.3 延后能力
 
-- Draft、Validate、Plan、Publish、Activate、Rollback 与活动版本状态机；不可变 Registry 基础已在 alpha.3a 建立。
-- Schema 变更计划、升级兼容检查和 last-known-good 恢复。
+- Publish、Activate、Rollback 与活动版本状态机；Registry 与准备变化事实已在 alpha.3a/alpha.3b 建立。
+- 数据迁移执行、完整升级兼容检查和 last-known-good 恢复；alpha.3b Plan 只解释变化。
 - 审计、Transactional Outbox、进程内 Worker 和邮件副作用。
 - Provider Descriptor、Capability Resolution、Console/SMTP Email Adapter。
 - Manager 前端应用；alpha.2 只生成 UI Schema。
 - 动态排序；alpha.2 会拒绝任何非空 `sortable` 声明。
-- Idempotency Key、发布 epoch、多节点模块收敛和分布式 Runtime。
+- 通用业务 Idempotency Key、发布 epoch、多节点模块收敛和分布式 Runtime；alpha.3b Key 只用于 Create Draft。
 - 授权下沉 Application：新增第二入口前，Use Case 必须显式接收 Project、Actor、Surface 和 Operation；Interfaces 不能继续作为唯一授权边界。
 - 业务写入与 Outbox 同事务、ProjectReleaseSnapshot + epoch，以及宽唯一值的 Hash 索引加原值碰撞复核评估。
 
@@ -143,7 +157,7 @@ alpha.3 必须用后续 ADR 定案并验证：显式且幂等的数据迁移；�
 - 动态 Action 只能调用白名单 Capability，并受超时、权限和幂等约束。
 - 分布式节点以 ProjectReleaseSnapshot + epoch 激活；请求、Job、Event 在执行期间固定 epoch。
 
-这些是不变式目标。alpha.3a 只验证“不可变登记事实”部分，不表示当前存在发布器、激活器或回滚器。
+这些是不变式目标。alpha.3a 验证“不可变登记事实”，alpha.3b 验证 Validate 无执行副作用和 Plan 不改变运行状态；它们不表示当前存在发布器、激活器、迁移器或回滚器。
 
 ## 9. v0.1 完成定义
 

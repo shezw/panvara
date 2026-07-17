@@ -440,8 +440,8 @@ func normalizeString(field domain.Field, input any, path string) (any, *Violatio
 	if !ok {
 		return nil, invalidType(path, "expected a string")
 	}
-	if !utf8.ValidString(value) {
-		return nil, invalidValue(path, "string must be valid UTF-8")
+	if !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
+		return nil, invalidValue(path, "string must be NUL-free valid UTF-8")
 	}
 	if field.Constraints.MaxLength != nil && utf8.RuneCountInString(value) > *field.Constraints.MaxLength {
 		return nil, &Violation{Code: "too_long", Path: path, Message: "string exceeds maxLength"}
@@ -457,8 +457,8 @@ func normalizeEmail(field domain.Field, input any, path string) (any, *Violation
 	if !ok {
 		return nil, invalidType(path, "expected an email address string")
 	}
-	if !utf8.ValidString(value) {
-		return nil, invalidValue(path, "email must be valid UTF-8")
+	if !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
+		return nil, invalidValue(path, "email must be NUL-free valid UTF-8")
 	}
 	if field.Constraints.MaxLength != nil && utf8.RuneCountInString(value) > *field.Constraints.MaxLength {
 		return nil, &Violation{Code: "too_long", Path: path, Message: "email exceeds maxLength"}

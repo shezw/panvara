@@ -1,0 +1,93 @@
+# Panvara
+# examples/drafts/crm-leads-invalid.yaml    2026-07-16
+#
+# @link    : https://github.com/shezw/panvara
+# @author  : shezw
+# @email   : hello@shezw.com
+
+apiVersion: panvara.dev/v1alpha1
+kind: AppModule
+metadata:
+  name: crm.leads
+  version: 1.0.0
+  labels:
+    en-US: CRM Leads
+    zh-CN: 销售线索
+spec:
+  resources:
+    - name: organization
+      labels:
+        en-US: Organization
+        zh-CN: 组织
+      fields:
+        - name: name
+          labels:
+            en-US: Name
+            zh-CN: 名称
+          type: string
+          required: true
+          unique: true
+          constraints:
+            maxLength: 128
+      api:
+        admin:
+          operations: [list, get, create, patch, delete]
+          writable: [name]
+          filterable: [name]
+      manager:
+        list:
+          columns: [id, name, created_at]
+          filters: [name]
+        form:
+          fields: [name]
+
+    - name: lead
+      labels:
+        en-US: Lead
+        zh-CN: 线索
+      fields:
+        - name: organization
+          labels:
+            en-US: Organization
+            zh-CN: 组织
+          type: reference
+          required: true
+          target: organization
+        - name: email
+          labels:
+            en-US: Email
+            zh-CN: 邮箱
+          type: email
+          required: true
+          unique: true
+          constraints:
+            maxLength: 320
+        - name: stage
+          labels:
+            en-US: Stage
+            zh-CN: 阶段
+          type: enum
+          required: true
+          options: [new, qualified, won, won]
+        - name: score
+          labels:
+            en-US: Score
+            zh-CN: 评分
+          type: decimal
+          constraints:
+            precision: 12
+            scale: 4
+      api:
+        public:
+          operations: [create]
+          writable: [organization, email, stage]
+        admin:
+          operations: [list, get, create, patch, delete]
+          writable: [organization, email, stage, score]
+          filterable: [email, stage]
+      manager:
+        list:
+          columns: [id, email, stage, created_at]
+          filters: [stage]
+        form:
+          fields: [organization, email, stage, score]

@@ -122,6 +122,16 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	); err != nil {
 		return nil, fmt.Errorf("register bootstrap AppModule revision: %w", err)
 	}
+	draftStore, err := postgres.NewDraftStore(pool)
+	if err != nil {
+		return nil, err
+	}
+	drafts, err := appmodule.NewDraftWorkflow(
+		draftStore, revisions, appmodule.SystemDraftClock{}, appmodule.NewDefaultDraftUUIDv7Generator(),
+	)
+	if err != nil {
+		return nil, err
+	}
 	store, err := postgres.NewStore(pool)
 	if err != nil {
 		return nil, err
@@ -136,7 +146,7 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	}
 	router, err := httpapi.New(httpapi.Config{
 		Project: projectContext, PublicActor: publicActor, Module: module, Records: records,
-		Revisions: revisions, AdminAuth: auth,
+		Revisions: revisions, Drafts: drafts, AdminAuth: auth,
 	})
 	if err != nil {
 		return nil, err

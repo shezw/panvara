@@ -54,13 +54,17 @@ set -a; . ./.env; . ./.env.local; set +a
 
 改变 PostgreSQL 端口时，必须同时修改 `PANVARA_DATABASE_URL` 中的端口。
 
+Panvara 使用的 PostgreSQL 18.4 数据库必须采用 UTF8 `server_encoding`，否则多语言 Source、标签与生成制品可能无法保存或读取。自备数据库先执行 `SHOW server_encoding;` 并确认返回 `UTF8`；仓库 Compose 创建的数据库符合该要求。当前版本尚未在 Server 启动或 Migrate 阶段自动 fail-fast 检查非 UTF8 数据库，这是后续需要补齐的运维保护。
+
 ## Revision Registry
 
 alpha.3a Registry 开发切片不增加配置项。Server 在 migration 之后、对外就绪之前，使用当前 `PANVARA_PROJECT_ID`、`PANVARA_MODULE_SOURCE` 和 `PANVARA_MODULE_FORMAT` 进行幂等 bootstrap 登记；失败会阻止启动。
 
-`PANVARA_ADMIN_TOKEN` 只保护 Registry 读取接口。当前没有 active Revision、Publish、Activate 或 Rollback 配置，也不能用 Registry List 顺序配置运行版本。
+`PANVARA_ADMIN_TOKEN` 保护 Registry 读取接口，以及 alpha.3b Draft、Validation 与 Plan 的 owner 控制面接口。当前没有 active Revision、Publish、Activate 或 Rollback 配置，也不能用 Registry List 顺序配置运行版本。
 
 `data_schema_identities` 也不是配置项。它是 Panvara 为不可变父 Revision 计算并按 format 升序返回的派生身份数组；新增算法只能追加新的 format，用户不能通过环境变量覆盖 fingerprint。
+
+alpha.3b 不增加环境变量。Draft Baseline 必须由每个 Create 请求显式传入；Draft Version（内部 generation）、Source Hash、Validation/Plan Format 和 Idempotency Key 都是请求或持久化身份，不能用环境变量全局覆盖。Draft/Plan 不会取代 `PANVARA_MODULE_SOURCE`：Server 仍从启动配置读取当前运行模块。
 
 ## 测试变量
 

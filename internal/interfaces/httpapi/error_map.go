@@ -50,6 +50,22 @@ func (handler *Handler) writeApplicationError(writer http.ResponseWriter, reques
 		writeError(writer, request, http.StatusForbidden, "forbidden", "project owner access is required", nil)
 	case errors.Is(err, appmodule.ErrRevisionNotFound):
 		writeError(writer, request, http.StatusNotFound, "revision_not_found", "module revision not found", nil)
+	case errors.Is(err, appmodule.ErrDraftInvalid):
+		writeError(writer, request, http.StatusBadRequest, "invalid_draft_request", "module draft request is invalid", nil)
+	case errors.Is(err, appmodule.ErrDraftForbidden):
+		writeError(writer, request, http.StatusForbidden, "forbidden", "project owner access is required", nil)
+	case errors.Is(err, appmodule.ErrDraftNotFound):
+		writeError(writer, request, http.StatusNotFound, "draft_not_found", "module draft not found", nil)
+	case errors.Is(err, appmodule.ErrDraftConflict):
+		writeError(writer, request, http.StatusPreconditionFailed, "precondition_failed", "draft ETag no longer matches", nil)
+	case errors.Is(err, appmodule.ErrDraftIdempotencyConflict):
+		writeError(writer, request, http.StatusConflict, "idempotency_key_conflict", "Idempotency-Key was already used for another draft intent", nil)
+	case errors.Is(err, appmodule.ErrValidationNotFound):
+		writeError(writer, request, http.StatusNotFound, "validation_not_found", "module draft validation not found", nil)
+	case errors.Is(err, appmodule.ErrValidationInvalid):
+		writeError(writer, request, http.StatusConflict, "draft_not_valid", "a current successful validation is required", nil)
+	case errors.Is(err, appmodule.ErrPlanNotFound):
+		writeError(writer, request, http.StatusNotFound, "plan_not_found", "module draft plan not found", nil)
 	case errors.Is(err, context.DeadlineExceeded):
 		writeError(writer, request, http.StatusGatewayTimeout, "deadline_exceeded", "request deadline exceeded", nil)
 	case errors.Is(err, context.Canceled):

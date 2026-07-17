@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	appmodule "github.com/shezw/panvara/internal/domain/appmodule"
 )
 
 func formatVersionETag(version uint64) string {
@@ -32,11 +34,23 @@ func formatArtifactETag(artifact []byte) string {
 }
 
 func parseIfMatch(request *http.Request) (uint64, *requestProblem) {
+	return parseVersionIfMatch(request, "record")
+}
+
+func parseDraftIfMatch(request *http.Request) (uint64, *requestProblem) {
+	version, problem := parseVersionIfMatch(request, "draft")
+	if problem == nil && version > appmodule.MaxDraftGeneration {
+		return 0, invalidIfMatch()
+	}
+	return version, problem
+}
+
+func parseVersionIfMatch(request *http.Request, subject string) (uint64, *requestProblem) {
 	values := request.Header.Values("If-Match")
 	if len(values) == 0 {
 		return 0, &requestProblem{
 			status: http.StatusPreconditionRequired, code: "if_match_required",
-			message: "If-Match with the current record ETag is required",
+			message: "If-Match with the current " + subject + " ETag is required",
 		}
 	}
 	if len(values) != 1 {
@@ -46,8 +60,9 @@ func parseIfMatch(request *http.Request) (uint64, *requestProblem) {
 	if len(value) < 3 || value[0] != '"' || value[len(value)-1] != '"' || strings.Contains(value[1:len(value)-1], `"`) {
 		return 0, invalidIfMatch()
 	}
-	version, err := strconv.ParseUint(value[1:len(value)-1], 10, 64)
-	if err != nil || version == 0 {
+	encoded := value[1 : len(value)-1]
+	version, err := strconv.ParseUint(encoded, 10, 64)
+	if err != nil || version == 0 || strconv.FormatUint(version, 10) != encoded {
 		return 0, invalidIfMatch()
 	}
 	return version, nil

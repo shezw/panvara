@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -387,8 +388,8 @@ func validateLabels(owner string, labels map[string]string) error {
 		if !labelKeyPattern.MatchString(key) {
 			return fmt.Errorf("%s has invalid label key %q", owner, key)
 		}
-		if value == "" || len(value) > maxLabelBytes || !utf8.ValidString(value) {
-			return fmt.Errorf("%s label %q must be non-empty valid UTF-8 up to %d bytes", owner, key, maxLabelBytes)
+		if value == "" || len(value) > maxLabelBytes || !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
+			return fmt.Errorf("%s label %q must be non-empty NUL-free valid UTF-8 up to %d bytes", owner, key, maxLabelBytes)
 		}
 	}
 	return nil

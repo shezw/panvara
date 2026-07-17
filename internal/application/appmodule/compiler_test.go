@@ -135,6 +135,24 @@ spec:
 	}
 }
 
+func TestCompilerRejectsEscapedNULInJSONLabel(t *testing.T) {
+	t.Parallel()
+
+	source := []byte(`{
+  "apiVersion": "panvara.dev/v1alpha1",
+  "kind": "AppModule",
+  "metadata": {
+    "name": "notes",
+    "version": "1.0.0",
+    "labels": {"en-US": "Notes\u0000Unsafe"}
+  },
+  "spec": {"resources": []}
+}`)
+	if _, err := NewCompiler().Compile(source, spec.FormatJSON); err == nil {
+		t.Fatal("Compile() accepted a decoded NUL label")
+	}
+}
+
 func TestCompilerGeneratesPolicyAlignedOpenAPIAndManagerSchema(t *testing.T) {
 	t.Parallel()
 

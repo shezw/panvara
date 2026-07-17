@@ -63,6 +63,7 @@ type Config struct {
 	Module      Module
 	Records     RecordService
 	Revisions   RevisionRegistryService
+	Drafts      DraftWorkflowService
 	AdminAuth   *BootstrapAdminAuth
 }
 
@@ -74,6 +75,7 @@ type Handler struct {
 	module      Module
 	records     RecordService
 	revisions   RevisionRegistryService
+	drafts      DraftWorkflowService
 	resources   map[string]resourcePolicy
 	router      http.Handler
 }
@@ -103,7 +105,7 @@ func New(config Config) (*Handler, error) {
 
 	handler := &Handler{
 		project: config.Project, publicActor: config.PublicActor, adminActor: config.AdminAuth.actor,
-		module: config.Module, records: config.Records, revisions: config.Revisions,
+		module: config.Module, records: config.Records, revisions: config.Revisions, drafts: config.Drafts,
 		resources: makeResourcePolicies(config.Module.Descriptor()),
 	}
 	mux := http.NewServeMux()
@@ -120,6 +122,9 @@ func New(config Config) (*Handler, error) {
 		mux.Handle(adminRevisionCollectionPath, config.AdminAuth.Middleware(revisionCollection))
 		mux.Handle(adminRevisionItemPath, config.AdminAuth.Middleware(revisionItem))
 		mux.Handle(adminRevisionSourcePath, config.AdminAuth.Middleware(revisionSource))
+	}
+	if config.Drafts != nil {
+		handler.registerDraftRoutes(mux, config.AdminAuth)
 	}
 	mux.HandleFunc("/", handler.handleNotFound)
 	handler.router = withRequestID(mux)
