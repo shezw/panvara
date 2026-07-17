@@ -1,0 +1,82 @@
+# Panvara
+# .github/workflows/docs-pages.yml    2026-07-17
+#
+# @link    : https://github.com/shezw/panvara
+# @author  : shezw
+# @email   : hello@shezw.com
+
+name: documentation-pages
+
+on:
+  push:
+    branches:
+      - main
+      - codex/alpha3b-draft-plan
+    paths:
+      - ".github/workflows/docs-pages.yml"
+      - "docs/**"
+      - "scripts/check-docs.mjs"
+      - "Makefile"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Install documentation dependencies
+        run: npm ci
+
+      - name: Validate and build documentation
+        run: npm run docs:check
+        env:
+          PANVARA_DOCS_BASE: /panvara/
+          PANVARA_DOCS_SOURCE_BRANCH: ${{ github.ref_name }}
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    name: Deploy documentation
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

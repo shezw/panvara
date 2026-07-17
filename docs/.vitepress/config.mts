@@ -15,8 +15,12 @@
 import { defineConfig } from "vitepress";
 import { withMermaid } from "vitepress-plugin-mermaid";
 
+const docsBase = process.env.PANVARA_DOCS_BASE ?? "/";
+const docsSourceBranch = process.env.PANVARA_DOCS_SOURCE_BRANCH ?? "main";
+
 export default withMermaid(
   defineConfig({
+    base: docsBase,
     lang: "zh-CN",
     title: "Panvara",
     titleTemplate: ":title · Panvara",
@@ -88,6 +92,7 @@ export default withMermaid(
           text: "参与开发",
           items: [
             { text: "开发环境", link: "/development" },
+            { text: "部署到 GitHub Pages", link: "/deployment/github-pages" },
             { text: "文档同步规范", link: "/contributing/documentation" },
             { text: "模块指南模板", link: "/contributing/module-guide-template" },
             { text: "验证测试框架", link: "/testing" },
@@ -128,7 +133,7 @@ export default withMermaid(
         label: "本页内容",
       },
       editLink: {
-        pattern: "https://github.com/shezw/panvara/edit/main/docs/:path",
+        pattern: `https://github.com/shezw/panvara/edit/${docsSourceBranch}/docs/:path`,
         text: "在 GitHub 上改进本页",
       },
       lastUpdatedText: "最后更新",

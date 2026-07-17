@@ -102,6 +102,7 @@ make docs-serve
 - [开发环境](docs/development.md)
 - [总体架构](docs/arch.md)
 - [验证测试框架](docs/testing.md)
+- [GitHub Pages 文档部署](docs/deployment/github-pages.md)
 - [Core v0 版本与边界](docs/core-v0.md)
 - [ADR-0001：模块与数据结构身份](docs/adr/0001-module-data-revision-identities.md)
 - [ADR-0002：不可变 Revision Registry](docs/adr/0002-immutable-revision-registry.md)
