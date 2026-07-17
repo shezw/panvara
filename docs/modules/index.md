@@ -26,14 +26,14 @@
 
 | 指南 | 当前状态 | 适合解决的问题 |
 | --- | --- | --- |
-| [AppModule](appmodule.md) | 已实现 | 怎样用 YAML/JSON 描述数据、API 和管理界面信息 |
+| [AppModule](appmodule.md) | alpha.2 声明/编译切片 | 怎样用 YAML/JSON 描述数据、API 和管理界面信息 |
 | [Revision Registry](revision-registry.md) | alpha.3a 开发切片 | 怎样查询不可变启动 Revision 与第一次登记的 Source |
 | [Draft 与 Change Plan](draft-planning.md) | alpha.3b 开发切片 | 怎样保存候选 Source、定位错误并在执行前解释变化 |
-| [Record Runtime](record-runtime.md) | 已实现 | 数据如何创建、读取、修改、删除和校验 |
-| [HTTP API](http-api.md) | 已实现 | 怎样通过 `curl` 或其他客户端调用 Panvara |
-| [运行模式](runtime-profiles.md) | Lite、Server 已实现 | 什么时候不需要数据库，什么时候需要 PostgreSQL |
-| [Project Context](project-context.md) | 单项目模式已实现 | 项目 ID、语言、时区和币种怎样配置 |
-| [CRM Leads](crm-leads.md) | 已实现的参考场景 | 怎样从零验收一条真实业务链路 |
+| [Record Runtime](record-runtime.md) | alpha.2 基础 CRUD 切片 | 数据如何创建、读取、修改、删除和校验 |
+| [HTTP API](http-api.md) | alpha.2 基础接口切片 | 怎样通过 `curl` 或其他客户端调用 Panvara |
+| [运行模式](runtime-profiles.md) | Lite/Server 可运行装配 | 什么时候不需要数据库，什么时候需要 PostgreSQL |
+| [Project Context](project-context.md) | alpha.2 单项目值对象切片 | 项目 ID、语言、时区和币种怎样配置 |
+| [CRM Leads](crm-leads.md) | alpha.2 参考纵向切片 | 怎样从零验收一条真实业务链路 |
 
 文档中出现“计划”“alpha.3+”的内容均不能作为当前验收结果；只有明确标注 alpha.3a/alpha.3b 开发切片的能力可以按对应 Guideline 验收。alpha.3b 的 Plan 不表示 Publish、Activate 或迁移已经实现。
 
@@ -74,7 +74,7 @@ make verify
 
 这些指南采用统一约定：
 
-- “已实现”表示当前仓库中有实际代码和自动化测试。
+- “可运行/已验证切片”表示当前仓库中有对应代码和自动化测试，但不自动推导模块功能完整或生产就绪。
 - “计划”表示设计方向，不应尝试按当前命令启动。
 - 所有命令默认在仓库根目录执行。
 - 默认服务地址是 `http://127.0.0.1:8080`。

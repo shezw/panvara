@@ -54,7 +54,9 @@ v0.1.0 是 Preview，不作“任意业务零代码生成”或“百万并发�
 
 升级兼容必须明确比较每一轴，禁止仅凭 Distribution 版本推断模块或数据兼容。
 
-## 4. alpha.2 已实现边界
+## 4. alpha.2 已验证切片
+
+这里的条目只表示对应代码路径和测试切片已经存在，不表示 Server Core 已达到功能完整、生产就绪或分布式就绪。当前事实审计见[当前 Server 架构事实](architecture-review-server-current.md)，缺失能力与完成门禁见 [Server Core 能力清单](roadmap/server-core.md)。
 
 - 保留 alpha.1 的 buildinfo、ProjectContext、ActorContext、Money、Kernel 生命周期和运维端点。
 - Profile：Lite 与 Server 可执行；Manager、Site、Commerce、Distributed 仍是 planned 并拒绝伪启动。

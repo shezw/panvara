@@ -18,6 +18,8 @@ Panvara 是面向中小开发团队的、数据模型驱动的可组合全栈框
 
 当前 Distribution 仍是 **v0.1.0-alpha.2**，已经形成“模型声明 → 编译与接口描述 → PostgreSQL CRUD → HTTP API”的最小闭环。当前开发分支另包含 **alpha.3a Revision Registry** 与 **alpha.3b Draft/Validate/Plan** 开发切片：前者不可变地登记启动模块，后者允许保存候选 Source、验证并解释变化；两者都不表示 alpha.3 发布生命周期已经完成。项目适合本地开发和架构验收，暂不适合直接承载生产业务。
 
+> **状态校正：** `server` Profile 当前只是有一条可运行的最小纵向装配，不表示 Server Core 已完成。身份与授权、发布/激活/回滚、迁移、审计、Outbox/Worker、Provider 和分布式收敛仍在 [Server Core 能力清单](docs/roadmap/server-core.md)；Manager 的完整范围和验收标准见 [Manager 路线图](docs/roadmap/manager.md)。
+
 ## 快速开始
 
 第一次使用，请从[使用与验收 Guideline](docs/getting-started/index.md)开始。它按非专业技术人员视角说明安装、编译、本地环境、API 操作、预期结果和故障恢复。
@@ -101,6 +103,9 @@ make docs-serve
 - [文档同步规范](docs/contributing/documentation.md)
 - [开发环境](docs/development.md)
 - [总体架构](docs/arch.md)
+- [当前 Server 架构事实](docs/architecture-review-server-current.md)
+- [Server Core 能力清单与完成门禁](docs/roadmap/server-core.md)
+- [Manager 范围与验收标准](docs/roadmap/manager.md)
 - [验证测试框架](docs/testing.md)
 - [GitHub Pages 文档部署](docs/deployment/github-pages.md)
 - [Core v0 版本与边界](docs/core-v0.md)

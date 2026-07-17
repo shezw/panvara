@@ -128,9 +128,9 @@ func executeWithFactories(
 	if err != nil {
 		return err
 	}
-	if !definition.Implemented {
+	if !definition.Runnable {
 		return fmt.Errorf(
-			"profile %q is planned but not implemented in Panvara %s",
+			"profile %q has no runnable composition in Panvara %s",
 			profileName,
 			info.Distribution,
 		)
@@ -159,7 +159,7 @@ func executeWithFactories(
 		}
 		defer application.Close()
 	default:
-		return fmt.Errorf("profile %q is marked implemented without a composition", profileName)
+		return fmt.Errorf("profile %q is marked runnable without a composition", profileName)
 	}
 
 	core := kernel.New()

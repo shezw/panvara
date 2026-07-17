@@ -4,7 +4,7 @@
     {
       "id": "appmodule",
       "name": "AppModule",
-      "status": "alpha.2",
+      "status": "alpha.2 declaration/compiler slice",
       "sourcePaths": [
         "internal/spec/appmodule",
         "internal/domain/appmodule",
@@ -54,7 +54,7 @@
     {
       "id": "record-runtime",
       "name": "Record Runtime",
-      "status": "alpha.2",
+      "status": "alpha.2 basic CRUD slice",
       "sourcePaths": [
         "internal/application/record",
         "internal/infrastructure/postgres",
@@ -66,7 +66,7 @@
     {
       "id": "http-api",
       "name": "HTTP API",
-      "status": "alpha.2",
+      "status": "alpha.2 basic API slice",
       "sourcePaths": [
         "internal/interfaces/httpapi",
         "internal/interfaces/httpserver"
@@ -77,7 +77,7 @@
     {
       "id": "runtime-profiles",
       "name": "Runtime Profiles",
-      "status": "alpha.2",
+      "status": "alpha.2 runnable composition",
       "sourcePaths": [
         "cmd/panvara",
         "internal/bootstrap/profile",
@@ -89,7 +89,7 @@
     {
       "id": "project-context",
       "name": "Project Context",
-      "status": "alpha.2",
+      "status": "alpha.2 single-project value-object slice",
       "sourcePaths": [
         "internal/domain/project",
         "internal/domain/actor",
@@ -101,7 +101,7 @@
     {
       "id": "crm-leads",
       "name": "CRM Leads Example",
-      "status": "alpha.2",
+      "status": "alpha.2 reference vertical slice",
       "sourcePaths": ["examples/modules/crm-leads.yaml"],
       "guide": "docs/modules/crm-leads.md",
       "acceptance": ["make test-server-smoke"]

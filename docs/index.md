@@ -48,4 +48,6 @@ features:
 当前版本适合开发、学习和架构验证，不应直接承载生产业务。Draft 与 Plan 只准备变化；Manager 页面、模块发布、激活、迁移与回滚、完整身份系统、Provider、Outbox 和分布式运行仍在后续阶段。
 :::
 
+`server` 当前表示一条可以运行和验收的纵向切片，并非 Server Core 已完成。请从[当前 Server 架构事实](/architecture-review-server-current)核对现状，从 [Server Core 能力清单](/roadmap/server-core)与 [Manager 范围及验收](/roadmap/manager)查看后续完整范围。
+
 从[使用与验收 Guideline](/getting-started/)开始，不需要先读完整架构文档。已经完成 Registry 验收时，可以直接进入 [Draft → Validate → Plan](/getting-started/draft-plan-acceptance)。

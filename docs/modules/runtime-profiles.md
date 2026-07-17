@@ -22,16 +22,16 @@ Profile 是部署组合，不是付费等级，也不是互相继承的产品版
 
 ## 当前状态
 
-| Profile | alpha.2 状态 | 当前用途 | 依赖 |
+| Profile | 当前状态 | 当前用途 | 依赖 |
 | --- | --- | --- | --- |
-| `lite` | 已实现 | Core 生命周期、健康和版本验收 | 无 |
-| `server` | 已实现 | 一个 AppModule 的 HTTP API 与持久化 CRUD | PostgreSQL |
-| `manager` | 计划 | Server + 管理控制面 | 尚不可启动 |
-| `site` | 计划 | Website 与 Assets | 尚不可启动 |
-| `commerce` | 计划 | Commerce 与 Payments | 尚不可启动 |
-| `distributed` | 计划 | Server/Worker 分进程 | 尚不可启动 |
+| `lite` | 可运行基础切片 | Core 生命周期、健康和版本验收 | 无 |
+| `server` | 可运行最小纵向切片；Server Core 未完成 | 一个 AppModule 的 HTTP API 与持久化 CRUD | PostgreSQL |
+| `manager` | 规划中 | Server + 管理控制面 | 尚不可启动 |
+| `site` | 规划中 | Website 与 Assets | 尚不可启动 |
+| `commerce` | 规划中 | Commerce 与 Payments | 尚不可启动 |
+| `distributed` | 规划中 | Server/Worker 分进程 | 尚不可启动 |
 
-计划中的 Profile 会明确报错并退出，不会伪装成已经可用。
+`Runnable` 只表示仓库有可执行装配路径，不表示功能完整或生产就绪。没有装配路径的 Profile 会明确报错并退出；Server Core 的完整待办和完成门禁见 [Server Core 能力清单](../roadmap/server-core.md)。
 
 ## 前置条件
 
@@ -145,7 +145,7 @@ Panvara 不自动加载文件。请按示例显式导入 `.env` 和 `.env.local`
 
 ### 可以运行 `--profile=manager` 看 UI 吗？
 
-不可以。alpha.2 会提示该 Profile 尚未实现并退出。
+不可以。当前版本会提示该 Profile 没有可运行装配并退出。
 
 ### 端口 5432 或 8080 被占用怎么办？
 

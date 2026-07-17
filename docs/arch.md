@@ -23,7 +23,7 @@ Panvara 是一套数据模型驱动、可组合、面向全球第三方生态的
 - 单区域内从单机扩展到数百台内网服务器。
 - 从数千并发逐步扩展到十万、百万并发；容量必须由基准和压测证明，架构不预先承诺固定数字。
 - 远距离区域作为独立 Partition，暂不提供跨区强一致写入。
-- 默认单项目部署；多项目托管是后续能力，不让首版背负完整 SaaS 多租户复杂度。
+- 默认单 Project、单 Environment 部署；多项目托管与跨环境总控是后续能力，不让首版背负完整 SaaS 多租户复杂度。
 
 ## 2. 架构判断
 
@@ -63,16 +63,16 @@ flowchart TB
 
 ## 3. 可组合运行 Profile
 
-| Preset | 适用场景 | 运行角色 / 业务能力 | 外部依赖 |
-| --- | --- | --- | --- |
-| Lite | Core 启动与运维验证 | all-in-one / Core lifecycle；AppModule 仅模型库 | 无 |
-| Server | 通用 App 后端 | server / AppModule | PostgreSQL |
-| Manager | 需要管理后台 | server + manager / AppModule | PostgreSQL |
-| Site | 内容站与网站 | server / AppModule + Site + Assets | PostgreSQL；对象存储可选 |
-| Commerce | 商城或付费产品 | server / AppModule + Commerce + Payments | PostgreSQL；缓存可选 |
-| Distributed | 分离 API 和 Worker | server + worker / 可配置业务能力 | PostgreSQL；NATS 可选 |
+| Preset | 适用场景 | 运行角色 / 业务能力 | 当前交付状态 | 外部依赖 |
+| --- | --- | --- | --- | --- |
+| Lite | Core 启动与运维验证 | all-in-one / Core lifecycle；AppModule 仅模型库 | 可运行基础切片 | 无 |
+| Server | 通用 App 后端 | server / AppModule | 可运行最小纵向切片；Server Core 未完成 | PostgreSQL |
+| Manager | 需要管理后台 | server + manager / AppModule | 规划中；无 Web 应用 | PostgreSQL |
+| Site | 内容站与网站 | server / AppModule + Site + Assets | 规划中 | PostgreSQL；对象存储可选 |
+| Commerce | 商城或付费产品 | server / AppModule + Commerce + Payments | 规划中 | PostgreSQL；缓存可选 |
+| Distributed | 分离 API 和 Worker | server + worker / 可配置业务能力 | 规划中 | PostgreSQL；NATS 可选 |
 
-Preset 是常用组合，不是继承树：Site 不强制 Manager，Commerce 不强制 Site，Headless 场景是一等公民。实现上把运行角色与业务 Feature 分开配置；只有当负载、隔离、安全或发布节奏确有差异时才拆进程。alpha.2 已实现 Lite 与 Server；Manager、Site、Commerce 和 Distributed 仍是 planned 并拒绝伪启动。
+Preset 是常用组合，不是继承树：Site 不强制 Manager，Commerce 不强制 Site，Headless 场景是一等公民。实现上把运行角色与业务 Feature 分开配置；只有当负载、隔离、安全或发布节奏确有差异时才拆进程。alpha.2 只为 Lite 与 Server 提供可执行装配路径；这表示“能够启动”，不表示对应产品范围开发完成。Manager、Site、Commerce 和 Distributed 尚无可运行装配并 fail fast。
 
 ## 4. 数据模型驱动模块
 
@@ -215,6 +215,8 @@ alpha.3 必须通过后续 ADR 定案迁移与激活协议：迁移任务显式�
 
 alpha.3 还必须验证业务写入与 Outbox 同事务、ProjectReleaseSnapshot + epoch 固定执行版本，并评估超过当前 512 字节唯一值边界时是否采用 Hash 索引加原值碰撞复核；这些都不是 alpha.2 已实现能力。
 
-尚未落地动态排序、Publish/Activate/Rollback、数据迁移执行、完整 Manager 应用、Outbox/Worker、Provider Runtime 和分布式进程。这些按 [Core v0 计划](core-v0.md) 逐步进入，而不是提前创建空实现。
+尚未落地动态排序、Publish/Activate/Rollback、数据迁移执行、完整 Manager 应用、Outbox/Worker、Provider Runtime 和分布式进程。这些按 [Server Core 能力清单](roadmap/server-core.md) 逐步进入，而不是提前创建空实现；Manager 的全部页面、Server 前置契约与逐阶段验收见 [Manager 范围与验收](roadmap/manager.md)。
+
+当前代码事实与未来方案分开记录：[当前 Server 架构事实](architecture-review-server-current.md) 只陈述已经存在的实现，[Server Core 能力清单](roadmap/server-core.md) 与 [Manager 范围与验收](roadmap/manager.md) 才是后续待办。
 
 开发和质量基线分别见 [开发环境](development.md) 与 [验证测试框架](testing.md)。

@@ -43,6 +43,14 @@ export default withMermaid(
       nav: [
         { text: "开始", link: "/getting-started/" },
         { text: "模块", link: "/modules/" },
+        {
+          text: "路线图",
+          items: [
+            { text: "当前 Server 事实", link: "/architecture-review-server-current" },
+            { text: "Server Core", link: "/roadmap/server-core" },
+            { text: "Manager", link: "/roadmap/manager" },
+          ],
+        },
         { text: "参考", link: "/reference/commands" },
         { text: "架构", link: "/arch" },
         {
@@ -82,6 +90,16 @@ export default withMermaid(
           ],
         },
         {
+          text: "架构与路线",
+          items: [
+            { text: "总体架构", link: "/arch" },
+            { text: "当前 Server 架构事实", link: "/architecture-review-server-current" },
+            { text: "Server Core 能力清单", link: "/roadmap/server-core" },
+            { text: "Manager 范围与验收", link: "/roadmap/manager" },
+            { text: "Core v0 路线", link: "/core-v0" },
+          ],
+        },
+        {
           text: "参考",
           items: [
             { text: "命令参考", link: "/reference/commands" },
@@ -96,8 +114,6 @@ export default withMermaid(
             { text: "文档同步规范", link: "/contributing/documentation" },
             { text: "模块指南模板", link: "/contributing/module-guide-template" },
             { text: "验证测试框架", link: "/testing" },
-            { text: "总体架构", link: "/arch" },
-            { text: "Core v0 路线", link: "/core-v0" },
             { text: "ADR-0001 身份拆分", link: "/adr/0001-module-data-revision-identities" },
             { text: "ADR-0002 不可变 Registry", link: "/adr/0002-immutable-revision-registry" },
             { text: "ADR-0003 Draft 与 Plan", link: "/adr/0003-draft-validation-change-plan" },

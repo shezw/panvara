@@ -59,13 +59,13 @@ func TestDefinitionForReturnsDefensiveCopy(t *testing.T) {
 	}
 }
 
-func TestAlphaTwoImplementedProfiles(t *testing.T) {
+func TestAlphaTwoRunnableProfiles(t *testing.T) {
 	t.Parallel()
 
 	for _, definition := range All() {
 		want := definition.Name == Lite || definition.Name == Server
-		if definition.Implemented != want {
-			t.Fatalf("profile %q implemented = %v, want %v", definition.Name, definition.Implemented, want)
+		if definition.Runnable != want {
+			t.Fatalf("profile %q runnable = %v, want %v", definition.Name, definition.Runnable, want)
 		}
 	}
 }

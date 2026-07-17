@@ -54,12 +54,12 @@ func TestExecuteRejectsUnknownProfile(t *testing.T) {
 	}
 }
 
-func TestExecuteRejectsPlannedProfile(t *testing.T) {
+func TestExecuteRejectsProfileWithoutRunnableComposition(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
 	err := execute(context.Background(), []string{"--profile=site"}, &output, emptyEnvironment)
-	if err == nil || !strings.Contains(err.Error(), "planned but not implemented") {
+	if err == nil || !strings.Contains(err.Error(), "has no runnable composition") {
 		t.Fatalf("execute() error = %v, want planned profile error", err)
 	}
 }

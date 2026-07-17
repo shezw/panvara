@@ -64,7 +64,9 @@ type Definition struct {
 	Features         []Feature
 	RequiredServices []string
 	OptionalServices []string
-	Implemented      bool
+	// Runnable only reports whether the distribution has an executable
+	// composition for this profile. It does not describe feature maturity.
+	Runnable bool
 }
 
 var definitions = map[Name]Definition{
@@ -73,7 +75,7 @@ var definitions = map[Name]Definition{
 		Description: "single-process Core and HTTP with no external service",
 		Roles:       []Role{RoleAllInOne},
 		Features:    []Feature{FeatureAppModule},
-		Implemented: true,
+		Runnable:    true,
 	},
 	Server: {
 		Name:             Server,
@@ -81,7 +83,7 @@ var definitions = map[Name]Definition{
 		Roles:            []Role{RoleServer},
 		Features:         []Feature{FeatureAppModule},
 		RequiredServices: []string{"postgres"},
-		Implemented:      true,
+		Runnable:         true,
 	},
 	Manager: {
 		Name:             Manager,
