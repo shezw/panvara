@@ -64,6 +64,7 @@ Manager 必须遵守以下原则：
 | 项目所有者 / 小团队开发者 | 检查 Server；管理数据；创建 Draft；审阅变化；发布、激活和回滚；配置 Provider | M0–M3 |
 | 业务数据维护者 | 不接触 YAML、API 或数据库，维护被授权的 Resource | M1；多人使用需 M4 身份与 RBAC |
 | 审阅者 / 支持人员 | 只读查看模型变化、发布结果、审计和失败请求 ID | M3–M4 |
+| 部署运维者 | 查看 Server/Worker 节点、epoch、发布收敛、积压和 Partition，不直接改数据库事实 | M4–M5 |
 
 当前 bootstrap Token 只代表单一 `project.owner`，不能安全地让多人共享。M0–M3 可以作为 Owner Preview；面向团队成员的生产使用必须等待 M4 的账号、会话和细粒度授权。
 
@@ -93,6 +94,10 @@ Manager 必须遵守以下原则：
 ├── 活动
 │   ├── Audit
 │   └── 发布、迁移与 Worker 任务
+├── Runtime（启用 Distributed 后）
+│   ├── Server / Worker 节点
+│   ├── Release epoch 与 rollout
+│   └── Partition / 容量状态
 └── 设置
     ├── Project Context
     └── 成员与权限
@@ -311,6 +316,39 @@ Manager 从单一 owner Preview 演进为可供小团队日常使用的生产预
 - [ ] Worker/Outbox 只有 Server 明确标记为可重试且 Actor 有权限时才显示重试操作。
 - [ ] M4 E2E 覆盖 Owner、数据维护者、审阅者三个角色的允许与拒绝矩阵。
 
+### M5：分布式运行管理与扩展面板（条件阶段）
+
+#### 目标
+
+只有项目启用 Distributed Profile 时，运维者才能观察并安全处理 Panvara 自身的多节点发布、Worker 与 Partition 状态。单机或模块化单体部署不需要实现或显示本阶段，也不能因此被判定为 Manager Core 未完成。
+
+#### 范围
+
+- Server/Worker 节点、角色、版本、心跳、readiness、当前 Snapshot/Epoch 与容量摘要。
+- Release rollout：desired、prepared、ACK、active、stale、failed 和 last-known-good。
+- Worker 积压、Lease、Retry/DLQ 摘要与受权限保护的 drain/retry 操作。
+- Partition Assignment、路由版本和落后节点；不提供跨区强一致的虚假开关。
+- 版本化 Extension Panel Manifest，让 Site/Commerce 等可选模块贡献隔离路由和页面，不把领域规则编入 Manager Shell。
+
+#### Server 前置
+
+- Node Registration、Node Release Status、Release ACK、Deployment/Rollout 与单调 epoch 契约。
+- Worker Heartbeat/Lease、Queue/DLQ 和安全 drain/retry 契约。
+- Partition Assignment、路由版本、容量/限流指标和完整 Application 授权。
+- Extension Manifest 的协议版本、权限、资源预算与故障隔离契约。
+
+#### Acceptance
+
+- [ ] 3 个以上 Server 节点与独立 Worker 的 E2E 能分别显示 desired 和 observed epoch；部分 ACK 不能显示为全部上线。
+- [ ] 节点断连、版本落后或无法加载 active Snapshot 时标记 stale/failed，并由 Server 摘流；Manager 不能在浏览器中自行判定收敛。
+- [ ] 网络分区、重复通知、乱序状态和页面刷新后，界面最终恢复 Server 权威状态，不把客户端缓存当作节点事实。
+- [ ] Rollout 失败时明确显示 last-known-good、受影响节点和允许的恢复动作；无安全资格时不显示强制激活。
+- [ ] Worker drain 不领取新任务，已领取任务按 Lease/优雅停止契约完成或恢复；Retry/DLQ 操作具备权限、幂等和审计。
+- [ ] Partition 页面只展示 Server 返回的 Assignment/Route Version；不能拖拽节点后直接伪造路由状态。
+- [ ] Extension Panel 未安装、版本不兼容、加载失败或抛错时，Manager Shell、Core 路由和其他面板仍可使用。
+- [ ] 未启用 Distributed Capability 时，Runtime 导航完全不出现，M0–M4 的单机旅程不依赖 Node/Partition API。
+- [ ] M5 不提供 Kubernetes、云主机或数据库运维控制台；它只管理 Panvara 的逻辑运行事实。
+
 ## 6. Prompt-to-Draft 设计约束
 
 ### 6.1 放置位置
@@ -394,6 +432,7 @@ Accept 不是 AI API 的副作用。Manager 读取 Proposal 的 proposed Source�
 | M2 | Revision API、Draft List/Get/Source/Replace、Validation、Plan、Assistant Proposal | Revision 与大部分 Draft API 已有；List/Proposal 缺失 |
 | M3 | Publish、migration operation、Activate、Rollback、active state、last-known-good、Audit/Outbox | 缺失 |
 | M4 | Account/Session/RBAC、Project Config Revision、Provider/Credential、Worker/Outbox 管理 | 缺失 |
+| M5 | Node/Release ACK/Rollout、Worker/Lease、Partition/Route、Extension Manifest | 条件阶段；Server Distributed 能力缺失 |
 
 所有契约共同遵守：
 
@@ -466,6 +505,7 @@ Accept 不是 AI API 的副作用。Manager 读取 Proposal 的 proposed Source�
 - 故障注入覆盖 401、403、404、409、412、415、422、428、500、503、超时和中断恢复。
 - AI Fixture 使用确定性 fake Provider 验证澄清、无效 Source、越界输出、超时、幂等和 prompt injection。
 - M3 使用真实 PostgreSQL 验证发布失败、迁移失败、重启恢复、回滚和 last-known-good。
+- M5 使用至少 3 个 Server 节点与独立 Worker 验证部分 ACK、断连、stale node、乱序通知、积压恢复和 Extension 崩溃隔离。
 - 自动可访问性检查不能替代键盘、焦点和读屏关键路径人工验收。
 
 ## 9. 明确非目标
@@ -501,4 +541,4 @@ Site、Commerce 等未来模块可以复用生成式 Resource Console；其专�
 9. 当前能力与 planned 能力在 UI、README、模块指南和发布说明中保持一致，不使用“可用”描述尚未落地的 Server 能力。
 10. 无已知 P0/P1 安全、数据覆盖、错误激活或不可恢复发布问题。
 
-Manager 整体完成还要求 M0–M4 全部达到 Definition of Done。若仅完成部分阶段，状态必须写成具体里程碑，例如“Manager M1 Resource Console 完成”，不能笼统标记为“Manager 完成”。
+Manager Core 完成要求 M0–M4 全部达到 Definition of Done；`distributed-ready` 还必须完成条件阶段 M5。若仅完成部分阶段，状态必须写成具体里程碑，例如“Manager M1 Resource Console 完成”，不能笼统标记为“Manager 完成”。
