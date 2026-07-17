@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shezw/panvara/internal/application/access"
 	"github.com/shezw/panvara/internal/domain/actor"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
 	"github.com/shezw/panvara/internal/domain/project"
@@ -30,124 +31,175 @@ import (
 func TestDraftWorkflowGoldenPathIdempotencyCASStalenessAndInvalidResult(t *testing.T) {
 	t.Parallel()
 	projectID := draftTestProject(t, "01981234-5678-7abc-8def-0123456789ab")
-	owner := draftTestOwner(t, projectID, "owner")
+	execution := appmoduleTestExecution(t, projectID, "owner", nil)
 	store := newDraftTestStore()
 	workflow := draftTestWorkflow(t, store, &draftTestRevisionReader{})
 	source := draftTestSource("notes", "1.0.0", "")
 
-	draft, created, err := workflow.Create(context.Background(), projectID, owner, "notes", CreateDraftInput{
+	draft, created, err := workflow.Create(context.Background(), execution, "notes", CreateDraftInput{
 		BaselineRevision: "none", Format: domain.SourceFormatYAML, Source: source, IdempotencyKey: "create-1",
 	})
 	if err != nil || !created || draft.Generation() != 1 {
 		t.Fatalf("Create() = %#v, %v, %v", draft, created, err)
 	}
-	replayed, created, err := workflow.Create(context.Background(), projectID, owner, "notes", CreateDraftInput{
+	replayed, created, err := workflow.Create(context.Background(), execution, "notes", CreateDraftInput{
 		BaselineRevision: "none", Format: domain.SourceFormatYAML, Source: source, IdempotencyKey: "create-1",
 	})
 	if err != nil || created || replayed.ID() != draft.ID() {
 		t.Fatalf("replayed Create() = %#v, %v, %v", replayed, created, err)
 	}
-	if _, _, err := workflow.Create(context.Background(), projectID, owner, "notes", CreateDraftInput{
+	if _, _, err := workflow.Create(context.Background(), execution, "notes", CreateDraftInput{
 		BaselineRevision: "none", Format: domain.SourceFormatYAML, Source: []byte("different"), IdempotencyKey: "create-1",
 	}); !errors.Is(err, ErrDraftIdempotencyConflict) {
 		t.Fatalf("conflicting Create() error = %v", err)
 	}
 
-	noOp, changed, err := workflow.Replace(context.Background(), projectID, owner, "notes", draft.ID().String(), 1,
+	noOp, changed, err := workflow.Replace(context.Background(), execution, "notes", draft.ID().String(), 1,
 		ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: source})
 	if err != nil || changed || noOp.Generation() != 1 || noOp.UpdatedAt() != draft.UpdatedAt() {
 		t.Fatalf("no-op Replace() = generation %d changed %v error %v", noOp.Generation(), changed, err)
 	}
-	validation, created, err := workflow.Validate(context.Background(), projectID, owner, "notes", draft.ID().String(), 1)
+	validation, created, err := workflow.Validate(context.Background(), execution, "notes", draft.ID().String(), 1)
 	if err != nil || !created || !validation.Valid || validation.Candidate == nil || validation.ID != validation.ValidationHash {
 		t.Fatalf("Validate(valid) = %#v, %v, %v", validation, created, err)
 	}
-	replayedValidation, created, err := workflow.Validate(context.Background(), projectID, owner, "notes", draft.ID().String(), 1)
+	replayedValidation, created, err := workflow.Validate(context.Background(), execution, "notes", draft.ID().String(), 1)
 	if err != nil || created || replayedValidation.ID != validation.ID {
 		t.Fatalf("replayed Validate() = %#v, %v, %v", replayedValidation, created, err)
 	}
-	plan, created, err := workflow.Plan(context.Background(), projectID, owner, "notes", draft.ID().String(), validation.ID, 1)
+	plan, created, err := workflow.Plan(context.Background(), execution, "notes", draft.ID().String(), validation.ID, 1)
 	if err != nil || !created || plan.Outcome != "review_required" || plan.MigrationExecutionSupported || len(plan.Changes) != 1 || plan.Changes[0].Code != "module.baseline_absent" {
 		t.Fatalf("Plan(initial) = %#v, %v, %v", plan, created, err)
 	}
-	replayedPlan, created, err := workflow.Plan(context.Background(), projectID, owner, "notes", draft.ID().String(), validation.ID, 1)
+	replayedPlan, created, err := workflow.Plan(context.Background(), execution, "notes", draft.ID().String(), validation.ID, 1)
 	if err != nil || created || replayedPlan.PlanHash != plan.PlanHash {
 		t.Fatalf("replayed Plan() = %#v, %v, %v", replayedPlan, created, err)
 	}
 	equivalentSource := append([]byte("# same compiled semantics\n"), source...)
-	equivalentDraft, changed, err := workflow.Replace(context.Background(), projectID, owner, "notes", draft.ID().String(), 1,
+	equivalentDraft, changed, err := workflow.Replace(context.Background(), execution, "notes", draft.ID().String(), 1,
 		ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: equivalentSource})
 	if err != nil || !changed || equivalentDraft.Generation() != 2 {
 		t.Fatalf("Replace(equivalent source) = %#v, %v, %v", equivalentDraft, changed, err)
 	}
-	equivalentValidation, _, err := workflow.Validate(context.Background(), projectID, owner, "notes", draft.ID().String(), 2)
+	equivalentValidation, _, err := workflow.Validate(context.Background(), execution, "notes", draft.ID().String(), 2)
 	if err != nil || !equivalentValidation.Valid || equivalentValidation.ID == validation.ID {
 		t.Fatalf("Validate(equivalent generation) = %#v, %v", equivalentValidation, err)
 	}
 	equivalentPlan, created, err := workflow.Plan(
-		context.Background(), projectID, owner, "notes", draft.ID().String(), equivalentValidation.ID, 2,
+		context.Background(), execution, "notes", draft.ID().String(), equivalentValidation.ID, 2,
 	)
 	if err != nil || !created || equivalentPlan.PlanHash != plan.PlanHash || equivalentPlan.ID == plan.ID {
 		t.Fatalf("Plan(equivalent generation) = %#v, %v, %v; first = %#v", equivalentPlan, created, err, plan)
 	}
 	if replay, created, err := workflow.Plan(
-		context.Background(), projectID, owner, "notes", draft.ID().String(), equivalentValidation.ID, 2,
+		context.Background(), execution, "notes", draft.ID().String(), equivalentValidation.ID, 2,
 	); err != nil || created || replay.ID != equivalentPlan.ID || replay.PlanHash != equivalentPlan.PlanHash {
 		t.Fatalf("Plan(equivalent replay) = %#v, %v, %v", replay, created, err)
 	}
 
-	updated, changed, err := workflow.Replace(context.Background(), projectID, owner, "notes", draft.ID().String(), 2,
+	updated, changed, err := workflow.Replace(context.Background(), execution, "notes", draft.ID().String(), 2,
 		ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: nil})
 	if err != nil || !changed || updated.Generation() != 3 {
 		t.Fatalf("Replace(empty) = %#v, %v, %v", updated, changed, err)
 	}
-	stale, err := workflow.GetValidation(context.Background(), projectID, owner, "notes", draft.ID().String(), validation.ID)
+	stale, err := workflow.GetValidation(context.Background(), execution, "notes", draft.ID().String(), validation.ID)
 	if err != nil || !stale.Stale {
 		t.Fatalf("GetValidation(stale) = %#v, %v", stale, err)
 	}
-	if _, _, err := workflow.Plan(context.Background(), projectID, owner, "notes", draft.ID().String(), validation.ID, 1); !errors.Is(err, ErrDraftConflict) {
+	if _, _, err := workflow.Plan(context.Background(), execution, "notes", draft.ID().String(), validation.ID, 1); !errors.Is(err, ErrDraftConflict) {
 		t.Fatalf("Plan(stale generation) error = %v", err)
 	}
-	invalid, created, err := workflow.Validate(context.Background(), projectID, owner, "notes", draft.ID().String(), 3)
+	invalid, created, err := workflow.Validate(context.Background(), execution, "notes", draft.ID().String(), 3)
 	if err != nil || !created || invalid.Valid || len(invalid.Issues) != 1 || invalid.Candidate != nil {
 		t.Fatalf("Validate(invalid) = %#v, %v, %v", invalid, created, err)
 	}
-	if _, _, err := workflow.Plan(context.Background(), projectID, owner, "notes", draft.ID().String(), invalid.ID, 3); !errors.Is(err, ErrValidationInvalid) {
+	if _, _, err := workflow.Plan(context.Background(), execution, "notes", draft.ID().String(), invalid.ID, 3); !errors.Is(err, ErrValidationInvalid) {
 		t.Fatalf("Plan(invalid validation) error = %v", err)
 	}
 }
 
-func TestDraftWorkflowAuthorizationIsProjectOwnerBound(t *testing.T) {
+func TestDraftWorkflowAuthorizesEveryUseCaseBeforeStoreAccess(t *testing.T) {
 	t.Parallel()
 	projectID := draftTestProject(t, "01981234-5678-7abc-8def-0123456789ab")
-	otherProject := draftTestProject(t, "01981234-5678-7abc-8def-0123456789ac")
-	workflow := draftTestWorkflow(t, newDraftTestStore(), &draftTestRevisionReader{})
-	actors := []actor.Context{
-		draftTestActor(t, projectID, "member", []string{"project.member"}),
-		draftTestOwner(t, otherProject, "owner"),
+	execution := appmoduleTestExecution(t, projectID, "self-reported-owner", []string{"project.owner"})
+	store := newDraftTestStore()
+	revisions := &draftTestRevisionReader{}
+	denied := &recordingAuthorizer{err: access.ErrForbidden}
+	workflow := draftTestWorkflowWithAuthorizer(t, store, revisions, denied)
+	unknown := "sha256:" + strings.Repeat("f", 64)
+
+	if _, _, err := workflow.Create(context.Background(), execution, "notes", CreateDraftInput{}); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("Create() error = %v, want access.ErrForbidden", err)
 	}
-	for _, subject := range actors {
-		if _, _, err := workflow.Create(context.Background(), projectID, subject, "notes", CreateDraftInput{
-			BaselineRevision: "none", Format: domain.SourceFormatYAML, IdempotencyKey: "denied",
-		}); !errors.Is(err, ErrDraftForbidden) {
-			t.Fatalf("Create(unauthorized) error = %v", err)
-		}
+	if _, err := workflow.Get(context.Background(), execution, "notes", "invalid"); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("Get() error = %v, want access.ErrForbidden", err)
+	}
+	if _, err := workflow.GetSource(context.Background(), execution, "notes", "invalid"); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("GetSource() error = %v, want access.ErrForbidden", err)
+	}
+	if _, _, err := workflow.Replace(context.Background(), execution, "notes", "invalid", 0, ReplaceDraftInput{}); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("Replace() error = %v, want access.ErrForbidden", err)
+	}
+	if _, _, err := workflow.Validate(context.Background(), execution, "notes", "invalid", 0); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("Validate() error = %v, want access.ErrForbidden", err)
+	}
+	if _, _, err := workflow.Plan(context.Background(), execution, "notes", "invalid", unknown, 0); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("Plan() error = %v, want access.ErrForbidden", err)
+	}
+	if _, err := workflow.GetValidation(context.Background(), execution, "notes", "invalid", unknown); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("GetValidation() error = %v, want access.ErrForbidden", err)
+	}
+	if _, err := workflow.GetPlan(context.Background(), execution, "notes", "invalid", unknown); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("GetPlan() error = %v, want access.ErrForbidden", err)
+	}
+	wantOperations := []access.Operation{
+		access.OperationDraftCreate,
+		access.OperationDraftGet,
+		access.OperationDraftGetSource,
+		access.OperationDraftReplace,
+		access.OperationDraftValidate,
+		access.OperationDraftPlan,
+		access.OperationDraftGetValidation,
+		access.OperationDraftGetPlan,
+	}
+	if got := denied.Operations(); !equalOperations(got, wantOperations) {
+		t.Fatalf("authorization operations = %#v, want %#v", got, wantOperations)
+	}
+	if calls := store.Calls(); calls != 0 {
+		t.Fatalf("denied draft store calls = %d, want 0", calls)
+	}
+	if revisions.calls != 0 {
+		t.Fatalf("denied draft revision calls = %d, want 0", revisions.calls)
+	}
+}
+
+func TestNewDraftWorkflowRequiresAuthorizer(t *testing.T) {
+	t.Parallel()
+	_, err := NewDraftWorkflow(
+		newDraftTestStore(),
+		&draftTestRevisionReader{},
+		nil,
+		draftTestClock{at: time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC)},
+		&draftTestIDGenerator{},
+	)
+	if !errors.Is(err, ErrDraftInvalid) {
+		t.Fatalf("NewDraftWorkflow(nil authorizer) error = %v, want ErrDraftInvalid", err)
 	}
 }
 
 func TestDraftValidationTreatsEscapedNULLabelAsAuthorError(t *testing.T) {
 	t.Parallel()
 	projectID := draftTestProject(t, "01981234-5678-7abc-8def-0123456789ab")
-	owner := draftTestOwner(t, projectID, "owner")
+	execution := appmoduleTestExecution(t, projectID, "owner", nil)
 	workflow := draftTestWorkflow(t, newDraftTestStore(), &draftTestRevisionReader{})
 	source := []byte(`{"apiVersion":"panvara.dev/v1alpha1","kind":"AppModule","metadata":{"name":"notes","version":"1.0.0","labels":{"en-US":"Bad\u0000Label"}},"spec":{"resources":[]}}`)
-	draft, _, err := workflow.Create(context.Background(), projectID, owner, "notes", CreateDraftInput{
+	draft, _, err := workflow.Create(context.Background(), execution, "notes", CreateDraftInput{
 		BaselineRevision: "none", Format: domain.SourceFormatJSON, Source: source, IdempotencyKey: "escaped-nul",
 	})
 	if err != nil {
 		t.Fatalf("Create(escaped NUL source) error = %v", err)
 	}
-	validation, created, err := workflow.Validate(context.Background(), projectID, owner, "notes", draft.ID().String(), 1)
+	validation, created, err := workflow.Validate(context.Background(), execution, "notes", draft.ID().String(), 1)
 	if err != nil || !created || validation.Valid || len(validation.Issues) == 0 {
 		t.Fatalf("Validate(escaped NUL label) = %#v, %v, %v", validation, created, err)
 	}
@@ -156,7 +208,7 @@ func TestDraftValidationTreatsEscapedNULLabelAsAuthorError(t *testing.T) {
 func TestDraftWorkflowGenerationBoundaryPreventsBigintOverflow(t *testing.T) {
 	t.Parallel()
 	projectID := draftTestProject(t, "01981234-5678-7abc-8def-0123456789ab")
-	owner := draftTestOwner(t, projectID, "owner")
+	execution := appmoduleTestExecution(t, projectID, "owner", nil)
 	id, _ := domain.ParseDraftID("01981234-5678-7abc-8def-0123456789b0")
 	baseline, _ := domain.NewDraftBaseline("")
 	source := draftTestSource("notes", "1.0.0", "")
@@ -172,15 +224,15 @@ func TestDraftWorkflowGenerationBoundaryPreventsBigintOverflow(t *testing.T) {
 	store := newDraftTestStore()
 	store.drafts[draftTestKey(projectID, "notes", id)] = draft
 	workflow := draftTestWorkflow(t, store, &draftTestRevisionReader{})
-	if got, changed, err := workflow.Replace(context.Background(), projectID, owner, "notes", id.String(), domain.MaxDraftGeneration,
+	if got, changed, err := workflow.Replace(context.Background(), execution, "notes", id.String(), domain.MaxDraftGeneration,
 		ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: source}); err != nil || changed || got.Generation() != domain.MaxDraftGeneration {
 		t.Fatalf("Replace(max no-op) = %#v, %v, %v", got, changed, err)
 	}
-	if _, _, err := workflow.Replace(context.Background(), projectID, owner, "notes", id.String(), domain.MaxDraftGeneration,
+	if _, _, err := workflow.Replace(context.Background(), execution, "notes", id.String(), domain.MaxDraftGeneration,
 		ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: append(source, '#')}); !errors.Is(err, ErrDraftConflict) {
 		t.Fatalf("Replace(max change) error = %v", err)
 	}
-	if _, _, err := workflow.Replace(context.Background(), projectID, owner, "notes", id.String(), domain.MaxDraftGeneration+1,
+	if _, _, err := workflow.Replace(context.Background(), execution, "notes", id.String(), domain.MaxDraftGeneration+1,
 		ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: source}); !errors.Is(err, ErrDraftInvalid) {
 		t.Fatalf("Replace(overflow ETag) error = %v", err)
 	}
@@ -189,23 +241,23 @@ func TestDraftWorkflowGenerationBoundaryPreventsBigintOverflow(t *testing.T) {
 func TestDraftWorkflowFixesAndReverifiesExactBaseline(t *testing.T) {
 	t.Parallel()
 	projectID := draftTestProject(t, "01981234-5678-7abc-8def-0123456789ab")
-	owner := draftTestOwner(t, projectID, "owner")
+	execution := appmoduleTestExecution(t, projectID, "owner", nil)
 	source := draftTestSource("notes", "1.0.0", "")
 	baseline := draftTestRevision(t, projectID, source)
 	reader := &draftTestRevisionReader{revision: baseline}
 	workflow := draftTestWorkflow(t, newDraftTestStore(), reader)
-	draft, created, err := workflow.Create(context.Background(), projectID, owner, "notes", CreateDraftInput{
+	draft, created, err := workflow.Create(context.Background(), execution, "notes", CreateDraftInput{
 		BaselineRevision: baseline.RevisionHash(), Format: domain.SourceFormatYAML,
 		Source: source, IdempotencyKey: "baseline-create",
 	})
 	if err != nil || !created || draft.Baseline().RevisionHash() != baseline.RevisionHash() {
 		t.Fatalf("Create(baseline) = %#v, %v, %v", draft, created, err)
 	}
-	validation, _, err := workflow.Validate(context.Background(), projectID, owner, "notes", draft.ID().String(), 1)
+	validation, _, err := workflow.Validate(context.Background(), execution, "notes", draft.ID().String(), 1)
 	if err != nil || !validation.Valid {
 		t.Fatalf("Validate(baseline) = %#v, %v", validation, err)
 	}
-	plan, _, err := workflow.Plan(context.Background(), projectID, owner, "notes", draft.ID().String(), validation.ID, 1)
+	plan, _, err := workflow.Plan(context.Background(), execution, "notes", draft.ID().String(), validation.ID, 1)
 	if err != nil || len(plan.Changes) != 0 || plan.DataSchemaChanged || plan.RecordNamespaceChanged || plan.Risk != "none" {
 		t.Fatalf("Plan(unchanged baseline) = %#v, %v", plan, err)
 	}
@@ -341,6 +393,7 @@ type draftTestStore struct {
 	idempotency map[string]draftTestIdempotency
 	validations map[string]DraftValidation
 	plans       map[string]DraftPlan
+	calls       int
 }
 
 func newDraftTestStore() *draftTestStore {
@@ -349,6 +402,7 @@ func newDraftTestStore() *draftTestStore {
 }
 
 func (store *draftTestStore) Create(_ context.Context, value domain.Draft, key, intent string) (domain.Draft, bool, error) {
+	store.calls++
 	scope := value.ProjectID().String() + "/" + value.ModuleName() + "/" + key
 	if existing, found := store.idempotency[scope]; found {
 		if existing.intent != intent {
@@ -362,6 +416,7 @@ func (store *draftTestStore) Create(_ context.Context, value domain.Draft, key, 
 }
 
 func (store *draftTestStore) Get(_ context.Context, projectID project.ID, module string, id domain.DraftID) (domain.Draft, error) {
+	store.calls++
 	value, found := store.drafts[draftTestKey(projectID, module, id)]
 	if !found {
 		return domain.Draft{}, ErrDraftNotFound
@@ -370,6 +425,7 @@ func (store *draftTestStore) Get(_ context.Context, projectID project.ID, module
 }
 
 func (store *draftTestStore) Replace(_ context.Context, projectID project.ID, module string, id domain.DraftID, expected uint64, replacement domain.DraftReplacement) (domain.Draft, bool, error) {
+	store.calls++
 	current, err := store.Get(context.Background(), projectID, module, id)
 	if err != nil {
 		return domain.Draft{}, false, err
@@ -394,6 +450,7 @@ func (store *draftTestStore) Replace(_ context.Context, projectID project.ID, mo
 }
 
 func (store *draftTestStore) SaveValidation(_ context.Context, value DraftValidation) (DraftValidation, bool, error) {
+	store.calls++
 	current, err := store.Get(context.Background(), value.ProjectID, value.ModuleName, value.DraftID)
 	if err != nil {
 		return DraftValidation{}, false, err
@@ -410,6 +467,7 @@ func (store *draftTestStore) SaveValidation(_ context.Context, value DraftValida
 }
 
 func (store *draftTestStore) GetValidation(_ context.Context, projectID project.ID, module string, id domain.DraftID, validationID string) (DraftValidation, error) {
+	store.calls++
 	value, found := store.validations[draftTestKey(projectID, module, id)+"/validation/"+validationID]
 	if !found {
 		return DraftValidation{}, ErrValidationNotFound
@@ -418,6 +476,7 @@ func (store *draftTestStore) GetValidation(_ context.Context, projectID project.
 }
 
 func (store *draftTestStore) SavePlan(_ context.Context, value DraftPlan, expected uint64) (DraftPlan, bool, error) {
+	store.calls++
 	current, err := store.Get(context.Background(), value.ProjectID, value.ModuleName, value.DraftID)
 	if err != nil {
 		return DraftPlan{}, false, err
@@ -434,6 +493,7 @@ func (store *draftTestStore) SavePlan(_ context.Context, value DraftPlan, expect
 }
 
 func (store *draftTestStore) GetPlan(_ context.Context, projectID project.ID, module string, id domain.DraftID, planID string) (DraftPlan, error) {
+	store.calls++
 	value, found := store.plans[draftTestKey(projectID, module, id)+"/plan/"+planID]
 	if !found {
 		return DraftPlan{}, ErrPlanNotFound
@@ -441,13 +501,16 @@ func (store *draftTestStore) GetPlan(_ context.Context, projectID project.ID, mo
 	return clonePlan(value), nil
 }
 
+func (store *draftTestStore) Calls() int { return store.calls }
+
 type draftTestRevisionReader struct {
 	revision domain.Revision
 	calls    int
 }
 
-func (reader *draftTestRevisionReader) Get(_ context.Context, projectID project.ID, _ actor.Context, module, revision string) (domain.Revision, error) {
+func (reader *draftTestRevisionReader) Get(_ context.Context, execution access.Execution, module, revision string) (domain.Revision, error) {
 	reader.calls++
+	projectID := execution.Scope().ProjectID()
 	if reader.revision.ProjectID().String() != projectID.String() || reader.revision.ModuleName() != module || reader.revision.RevisionHash() != revision {
 		return domain.Revision{}, ErrRevisionNotFound
 	}
@@ -456,7 +519,17 @@ func (reader *draftTestRevisionReader) Get(_ context.Context, projectID project.
 
 func draftTestWorkflow(t *testing.T, store DraftStore, revisions DraftRevisionReader) *DraftWorkflow {
 	t.Helper()
-	value, err := NewDraftWorkflow(store, revisions,
+	return draftTestWorkflowWithAuthorizer(t, store, revisions, &recordingAuthorizer{})
+}
+
+func draftTestWorkflowWithAuthorizer(
+	t *testing.T,
+	store DraftStore,
+	revisions DraftRevisionReader,
+	authorizer access.Authorizer,
+) *DraftWorkflow {
+	t.Helper()
+	value, err := NewDraftWorkflow(store, revisions, authorizer,
 		draftTestClock{at: time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC)}, &draftTestIDGenerator{})
 	if err != nil {
 		t.Fatal(err)

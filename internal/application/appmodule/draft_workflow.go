@@ -20,7 +20,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/shezw/panvara/internal/domain/actor"
+	"github.com/shezw/panvara/internal/application/access"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
 	"github.com/shezw/panvara/internal/domain/project"
 	spec "github.com/shezw/panvara/internal/spec/appmodule/v1alpha1"
@@ -31,26 +31,38 @@ var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,12
 // DraftWorkflow coordinates authorized drafting, deterministic validation, and
 // side-effect-free planning. It has no publication, activation, or Record port.
 type DraftWorkflow struct {
-	store     DraftStore
-	revisions DraftRevisionReader
-	clock     DraftClock
-	ids       DraftIDGenerator
-	compiler  *Compiler
+	store      DraftStore
+	revisions  DraftRevisionReader
+	authorizer access.Authorizer
+	clock      DraftClock
+	ids        DraftIDGenerator
+	compiler   *Compiler
 }
 
 // NewDraftWorkflow constructs the draft application boundary.
-func NewDraftWorkflow(store DraftStore, revisions DraftRevisionReader, clock DraftClock, ids DraftIDGenerator) (*DraftWorkflow, error) {
-	if store == nil || revisions == nil || clock == nil || ids == nil {
+func NewDraftWorkflow(
+	store DraftStore,
+	revisions DraftRevisionReader,
+	authorizer access.Authorizer,
+	clock DraftClock,
+	ids DraftIDGenerator,
+) (*DraftWorkflow, error) {
+	if store == nil || revisions == nil || authorizer == nil || clock == nil || ids == nil {
 		return nil, fmt.Errorf("%w: draft workflow dependency is nil", ErrDraftInvalid)
 	}
-	return &DraftWorkflow{store: store, revisions: revisions, clock: clock, ids: ids, compiler: NewCompiler()}, nil
+	return &DraftWorkflow{
+		store: store, revisions: revisions, authorizer: authorizer,
+		clock: clock, ids: ids, compiler: NewCompiler(),
+	}, nil
 }
 
 // Create persists a raw, possibly invalid source with a fixed explicit baseline.
-func (workflow *DraftWorkflow) Create(ctx context.Context, projectID project.ID, owner actor.Context, module string, input CreateDraftInput) (domain.Draft, bool, error) {
-	if err := authorizeDraft(projectID, owner); err != nil {
+func (workflow *DraftWorkflow) Create(ctx context.Context, execution access.Execution, module string, input CreateDraftInput) (domain.Draft, bool, error) {
+	if err := workflow.authorize(ctx, execution, access.OperationDraftCreate); err != nil {
 		return domain.Draft{}, false, err
 	}
+	projectID := execution.Scope().ProjectID()
+	owner := execution.Actor()
 	if err := ctx.Err(); err != nil {
 		return domain.Draft{}, false, err
 	}
@@ -67,7 +79,7 @@ func (workflow *DraftWorkflow) Create(ctx context.Context, projectID project.ID,
 		return domain.Draft{}, false, fmt.Errorf("%w: %v", ErrDraftInvalid, err)
 	}
 	if !baseline.None() {
-		if _, err := workflow.revisions.Get(ctx, projectID, owner, module, baseline.RevisionHash()); err != nil {
+		if _, err := workflow.revisions.Get(ctx, execution, module, baseline.RevisionHash()); err != nil {
 			return domain.Draft{}, false, fmt.Errorf("verify draft baseline: %w", err)
 		}
 	}
@@ -103,10 +115,11 @@ func (workflow *DraftWorkflow) Create(ctx context.Context, projectID project.ID,
 }
 
 // Get returns draft metadata and source identity after owner authorization.
-func (workflow *DraftWorkflow) Get(ctx context.Context, projectID project.ID, owner actor.Context, module, idText string) (domain.Draft, error) {
-	if err := authorizeDraft(projectID, owner); err != nil {
+func (workflow *DraftWorkflow) Get(ctx context.Context, execution access.Execution, module, idText string) (domain.Draft, error) {
+	if err := workflow.authorize(ctx, execution, access.OperationDraftGet); err != nil {
 		return domain.Draft{}, err
 	}
+	projectID := execution.Scope().ProjectID()
 	id, err := parseDraftRequest(module, idText)
 	if err != nil {
 		return domain.Draft{}, err
@@ -115,8 +128,16 @@ func (workflow *DraftWorkflow) Get(ctx context.Context, projectID project.ID, ow
 }
 
 // GetSource returns raw bytes bound to the current generation.
-func (workflow *DraftWorkflow) GetSource(ctx context.Context, projectID project.ID, owner actor.Context, module, idText string) (DraftSource, error) {
-	draft, err := workflow.Get(ctx, projectID, owner, module, idText)
+func (workflow *DraftWorkflow) GetSource(ctx context.Context, execution access.Execution, module, idText string) (DraftSource, error) {
+	if err := workflow.authorize(ctx, execution, access.OperationDraftGetSource); err != nil {
+		return DraftSource{}, err
+	}
+	projectID := execution.Scope().ProjectID()
+	id, err := parseDraftRequest(module, idText)
+	if err != nil {
+		return DraftSource{}, err
+	}
+	draft, err := workflow.get(ctx, projectID, strings.TrimSpace(module), id)
 	if err != nil {
 		return DraftSource{}, err
 	}
@@ -125,10 +146,12 @@ func (workflow *DraftWorkflow) GetSource(ctx context.Context, projectID project.
 
 // Replace atomically replaces complete raw source at an expected generation.
 // Byte-identical replacements are successful no-ops that retain generation and audit metadata.
-func (workflow *DraftWorkflow) Replace(ctx context.Context, projectID project.ID, owner actor.Context, module, idText string, expectedGeneration uint64, input ReplaceDraftInput) (domain.Draft, bool, error) {
-	if err := authorizeDraft(projectID, owner); err != nil {
+func (workflow *DraftWorkflow) Replace(ctx context.Context, execution access.Execution, module, idText string, expectedGeneration uint64, input ReplaceDraftInput) (domain.Draft, bool, error) {
+	if err := workflow.authorize(ctx, execution, access.OperationDraftReplace); err != nil {
 		return domain.Draft{}, false, err
 	}
+	projectID := execution.Scope().ProjectID()
+	owner := execution.Actor()
 	id, err := parseDraftRequest(module, idText)
 	if err != nil || !validDraftGeneration(expectedGeneration) {
 		return domain.Draft{}, false, fmt.Errorf("%w: invalid draft identity or generation", ErrDraftInvalid)
@@ -159,10 +182,12 @@ func (workflow *DraftWorkflow) Replace(ctx context.Context, projectID project.ID
 
 // Validate compiles one exact generation and persists a deterministic immutable result.
 // Invalid AppModule source is a successful use-case result with Valid=false.
-func (workflow *DraftWorkflow) Validate(ctx context.Context, projectID project.ID, owner actor.Context, module, idText string, expectedGeneration uint64) (DraftValidation, bool, error) {
-	if err := authorizeDraft(projectID, owner); err != nil {
+func (workflow *DraftWorkflow) Validate(ctx context.Context, execution access.Execution, module, idText string, expectedGeneration uint64) (DraftValidation, bool, error) {
+	if err := workflow.authorize(ctx, execution, access.OperationDraftValidate); err != nil {
 		return DraftValidation{}, false, err
 	}
+	projectID := execution.Scope().ProjectID()
+	owner := execution.Actor()
 	id, err := parseDraftRequest(module, idText)
 	if err != nil || !validDraftGeneration(expectedGeneration) {
 		return DraftValidation{}, false, fmt.Errorf("%w: invalid validation identity or generation", ErrDraftInvalid)
@@ -176,7 +201,7 @@ func (workflow *DraftWorkflow) Validate(ctx context.Context, projectID project.I
 		return DraftValidation{}, false, ErrDraftConflict
 	}
 	if !draft.Baseline().None() {
-		if _, err := workflow.revisions.Get(ctx, projectID, owner, module, draft.Baseline().RevisionHash()); err != nil {
+		if _, err := workflow.revisions.Get(ctx, execution, module, draft.Baseline().RevisionHash()); err != nil {
 			return DraftValidation{}, false, fmt.Errorf("reverify draft baseline: %w", err)
 		}
 	}
@@ -221,10 +246,12 @@ func (workflow *DraftWorkflow) Validate(ctx context.Context, projectID project.I
 
 // Plan deterministically compares one exact successful validation with its fixed baseline.
 // It never registers, publishes, activates, migrates, or changes Record state.
-func (workflow *DraftWorkflow) Plan(ctx context.Context, projectID project.ID, owner actor.Context, module, idText, validationID string, expectedGeneration uint64) (DraftPlan, bool, error) {
-	if err := authorizeDraft(projectID, owner); err != nil {
+func (workflow *DraftWorkflow) Plan(ctx context.Context, execution access.Execution, module, idText, validationID string, expectedGeneration uint64) (DraftPlan, bool, error) {
+	if err := workflow.authorize(ctx, execution, access.OperationDraftPlan); err != nil {
 		return DraftPlan{}, false, err
 	}
+	projectID := execution.Scope().ProjectID()
+	owner := execution.Actor()
 	id, err := parseDraftRequest(module, idText)
 	if err != nil || !validDraftGeneration(expectedGeneration) || !domain.ValidContentHash(strings.TrimSpace(validationID)) {
 		return DraftPlan{}, false, fmt.Errorf("%w: invalid plan identity or generation", ErrDraftInvalid)
@@ -258,7 +285,7 @@ func (workflow *DraftWorkflow) Plan(ctx context.Context, projectID project.ID, o
 	var baselineIdentity domain.DataSchemaIdentity
 	baselineExists := validation.BaselineRevision != ""
 	if baselineExists {
-		baseline, err := workflow.revisions.Get(ctx, projectID, owner, module, validation.BaselineRevision)
+		baseline, err := workflow.revisions.Get(ctx, execution, module, validation.BaselineRevision)
 		if err != nil {
 			return DraftPlan{}, false, fmt.Errorf("reverify plan baseline: %w", err)
 		}
@@ -303,10 +330,11 @@ func (workflow *DraftWorkflow) Plan(ctx context.Context, projectID project.ID, o
 }
 
 // GetValidation returns one immutable snapshot and computes current staleness.
-func (workflow *DraftWorkflow) GetValidation(ctx context.Context, projectID project.ID, owner actor.Context, module, idText, validationID string) (DraftValidation, error) {
-	if err := authorizeDraft(projectID, owner); err != nil {
+func (workflow *DraftWorkflow) GetValidation(ctx context.Context, execution access.Execution, module, idText, validationID string) (DraftValidation, error) {
+	if err := workflow.authorize(ctx, execution, access.OperationDraftGetValidation); err != nil {
 		return DraftValidation{}, err
 	}
+	projectID := execution.Scope().ProjectID()
 	id, err := parseDraftRequest(module, idText)
 	if err != nil || !domain.ValidContentHash(strings.TrimSpace(validationID)) {
 		return DraftValidation{}, fmt.Errorf("%w: invalid validation identity", ErrDraftInvalid)
@@ -328,10 +356,11 @@ func (workflow *DraftWorkflow) GetValidation(ctx context.Context, projectID proj
 }
 
 // GetPlan returns one immutable snapshot and computes current staleness.
-func (workflow *DraftWorkflow) GetPlan(ctx context.Context, projectID project.ID, owner actor.Context, module, idText, planID string) (DraftPlan, error) {
-	if err := authorizeDraft(projectID, owner); err != nil {
+func (workflow *DraftWorkflow) GetPlan(ctx context.Context, execution access.Execution, module, idText, planID string) (DraftPlan, error) {
+	if err := workflow.authorize(ctx, execution, access.OperationDraftGetPlan); err != nil {
 		return DraftPlan{}, err
 	}
+	projectID := execution.Scope().ProjectID()
 	id, err := parseDraftRequest(module, idText)
 	if err != nil || !domain.ValidContentHash(strings.TrimSpace(planID)) {
 		return DraftPlan{}, fmt.Errorf("%w: invalid plan identity", ErrDraftInvalid)
@@ -363,14 +392,18 @@ func (workflow *DraftWorkflow) get(ctx context.Context, projectID project.ID, mo
 	return value, nil
 }
 
-func authorizeDraft(projectID project.ID, owner actor.Context) error {
-	if !projectID.Valid() {
-		return fmt.Errorf("%w: invalid project", ErrDraftInvalid)
+func (workflow *DraftWorkflow) authorize(
+	ctx context.Context,
+	execution access.Execution,
+	operation access.Operation,
+) error {
+	if workflow == nil || workflow.authorizer == nil {
+		return fmt.Errorf("%w: uninitialized draft workflow", ErrDraftInvalid)
 	}
-	if !owner.Valid() || owner.Anonymous() || owner.ProjectID().String() != projectID.String() || !owner.HasRole("project.owner") {
-		return ErrDraftForbidden
+	if err := execution.Validate(); err != nil {
+		return err
 	}
-	return nil
+	return workflow.authorizer.Authorize(ctx, execution, operation)
 }
 
 func parseDraftRequest(module, idText string) (domain.DraftID, error) {

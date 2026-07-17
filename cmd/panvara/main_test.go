@@ -165,7 +165,8 @@ func TestExecuteServerProfileAssemblesApplicationRouter(t *testing.T) {
 		},
 		func(_ context.Context, config serverConfig) (*applicationRuntime, error) {
 			if config.databaseURL != "postgres://redacted" || config.moduleSource != "crm.yaml" ||
-				config.projectID != "018f7e93-7b2c-7abc-8def-1234567890ab" {
+				config.projectID != "018f7e93-7b2c-7abc-8def-1234567890ab" ||
+				config.environmentKey != "default" {
 				t.Fatalf("server config = %+v", config)
 			}
 			return &applicationRuntime{

@@ -67,6 +67,34 @@ func (mutation Mutation) Valid() bool {
 	return mutation == MutationCreate || mutation == MutationPatch
 }
 
+// Operation identifies the fixed record use case whose AppModule policy must
+// be checked by the application layer. Callers do not select this value; each
+// Service method binds its own operation.
+type Operation string
+
+const (
+	// OperationCreate authorizes creation of a record.
+	OperationCreate Operation = "create"
+	// OperationGet authorizes reading one record.
+	OperationGet Operation = "get"
+	// OperationList authorizes listing records.
+	OperationList Operation = "list"
+	// OperationPatch authorizes patching one record.
+	OperationPatch Operation = "patch"
+	// OperationDelete authorizes deleting one record.
+	OperationDelete Operation = "delete"
+)
+
+// Valid reports whether operation is one of the explicit record use cases.
+func (operation Operation) Valid() bool {
+	switch operation {
+	case OperationCreate, OperationGet, OperationList, OperationPatch, OperationDelete:
+		return true
+	default:
+		return false
+	}
+}
+
 var (
 	recordIDPattern = regexp.MustCompile(
 		`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`,
@@ -195,6 +223,14 @@ type ListValidationInput struct {
 	Filters []ListFilter
 }
 
+// OperationValidationInput asks the immutable module revision to authorize a
+// fixed record use case before any record persistence is accessed.
+type OperationValidationInput struct {
+	Scope     Scope
+	Surface   Surface
+	Operation Operation
+}
+
 // ValidatedData is the trusted complete-record output of a model validator.
 // For MutationPatch it must contain the full merged record and all unique and
 // reference indexes, never only the patch. Service applies a second structural
@@ -208,6 +244,7 @@ type ValidatedData struct {
 // Validator is implemented by the AppModule IR adapter owned by the runtime
 // composition root. The record application layer does not depend on IR layout.
 type Validator interface {
+	AuthorizeOperation(context.Context, OperationValidationInput) error
 	Validate(context.Context, ValidationInput) (ValidatedData, error)
 	ValidateList(context.Context, ListValidationInput) ([]ListFilter, error)
 }

@@ -89,7 +89,7 @@
     {
       "id": "project-context",
       "name": "Project Context",
-      "status": "alpha.2 single-project value-object slice",
+      "status": "P0-01a persistent single-default-environment slice",
       "sourcePaths": [
         "internal/domain/project",
         "internal/domain/actor",
@@ -97,6 +97,25 @@
       ],
       "guide": "docs/modules/project-context.md",
       "acceptance": ["make test"]
+    },
+    {
+      "id": "project-access",
+      "name": "Execution Scope and Access Kernel",
+      "status": "P0-01a runnable slice",
+      "sourcePaths": [
+        "internal/application/access",
+        "internal/domain/project/environment.go",
+        "internal/domain/project/scope.go",
+        "internal/infrastructure/postgres/project_access_store.go",
+        "db/migrations/0004_project_environment_access.sql"
+      ],
+      "guide": "docs/modules/project-access.md",
+      "acceptance": [
+        "make test",
+        "make test-integration",
+        "make test-server-smoke",
+        "make docs-check"
+      ]
     },
     {
       "id": "crm-leads",

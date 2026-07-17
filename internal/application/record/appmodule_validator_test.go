@@ -175,8 +175,35 @@ func TestCompiledModuleValidatorListAuthorizesAndNormalizesFilters(t *testing.T)
 		Scope:   testModuleScope(t, module, "lead"),
 		Surface: SurfacePublic,
 		Filters: []ListFilter{{Field: "email", Value: "ADA@Example.COM"}},
-	}); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("ValidateList(public) error = %v, want ErrInvalidArgument", err)
+	}); !errors.Is(err, ErrOperationForbidden) {
+		t.Fatalf("ValidateList(public) error = %v, want ErrOperationForbidden", err)
+	}
+}
+
+func TestCompiledModuleValidatorAuthorizesEveryDeclaredOperation(t *testing.T) {
+	t.Parallel()
+	module := testCompiledModule(t)
+	validator, err := NewCompiledModuleValidator(module)
+	if err != nil {
+		t.Fatalf("NewCompiledModuleValidator() error = %v", err)
+	}
+	lead := testModuleScope(t, module, "lead")
+	for _, operation := range []Operation{OperationList, OperationPatch} {
+		if err := validator.AuthorizeOperation(context.Background(), OperationValidationInput{
+			Scope: lead, Surface: SurfaceAdmin, Operation: operation,
+		}); err != nil {
+			t.Fatalf("AuthorizeOperation(%s) error = %v", operation, err)
+		}
+	}
+	if err := validator.AuthorizeOperation(context.Background(), OperationValidationInput{
+		Scope: lead, Surface: SurfaceAdmin, Operation: OperationGet,
+	}); !errors.Is(err, ErrOperationForbidden) {
+		t.Fatalf("AuthorizeOperation(undeclared get) error = %v, want ErrOperationForbidden", err)
+	}
+	if err := validator.AuthorizeOperation(context.Background(), OperationValidationInput{
+		Scope: lead, Surface: SurfacePublic, Operation: OperationDelete,
+	}); !errors.Is(err, ErrOperationForbidden) {
+		t.Fatalf("AuthorizeOperation(public delete) error = %v, want ErrOperationForbidden", err)
 	}
 }
 

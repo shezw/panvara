@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shezw/panvara/internal/application/access"
 	appmodule "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/application/record"
 	"github.com/shezw/panvara/internal/domain/actor"
@@ -33,6 +34,7 @@ import (
 )
 
 const maxModuleSourceBytes int64 = 1 << 20
+const bootstrapAdminPrincipal = "bootstrap-admin"
 
 type applicationRuntime struct {
 	handler  http.Handler
@@ -86,7 +88,7 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 		return nil, fmt.Errorf("construct public actor context: %w", err)
 	}
 	adminActor, err := actor.New(
-		projectContext.ID().String(), "bootstrap-admin", []string{"project.owner"},
+		projectContext.ID().String(), bootstrapAdminPrincipal, nil,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("construct bootstrap administrator context: %w", err)
@@ -109,11 +111,27 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	if err := postgres.Migrate(ctx, pool); err != nil {
 		return nil, err
 	}
+	projectAccessStore, err := postgres.NewProjectAccessStore(pool)
+	if err != nil {
+		return nil, err
+	}
+	executionScope, err := projectAccessStore.EnsureBootstrapScope(
+		ctx, projectContext, config.environmentKey, bootstrapAdminPrincipal,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ensure bootstrap project access scope: %w", err)
+	}
+	authorizer, err := access.NewPolicy(projectAccessStore)
+	if err != nil {
+		return nil, fmt.Errorf("construct application access policy: %w", err)
+	}
 	revisionStore, err := postgres.NewRevisionStore(pool)
 	if err != nil {
 		return nil, err
 	}
-	revisions, err := appmodule.NewRevisionRegistry(revisionStore, appmodule.SystemRevisionClock{})
+	revisions, err := appmodule.NewRevisionRegistry(
+		revisionStore, authorizer, appmodule.SystemRevisionClock{},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +145,8 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 		return nil, err
 	}
 	drafts, err := appmodule.NewDraftWorkflow(
-		draftStore, revisions, appmodule.SystemDraftClock{}, appmodule.NewDefaultDraftUUIDv7Generator(),
+		draftStore, revisions, authorizer, appmodule.SystemDraftClock{},
+		appmodule.NewDefaultDraftUUIDv7Generator(),
 	)
 	if err != nil {
 		return nil, err
@@ -140,12 +159,13 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	if err != nil {
 		return nil, err
 	}
-	records, err := record.NewDefaultService(store, validator)
+	records, err := record.NewDefaultService(store, validator, authorizer)
 	if err != nil {
 		return nil, err
 	}
 	router, err := httpapi.New(httpapi.Config{
-		Project: projectContext, PublicActor: publicActor, Module: module, Records: records,
+		Project: projectContext, Scope: executionScope,
+		PublicActor: publicActor, Module: module, Records: records,
 		Revisions: revisions, Drafts: drafts, AdminAuth: auth,
 	})
 	if err != nil {

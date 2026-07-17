@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shezw/panvara/internal/application/access"
+	"github.com/shezw/panvara/internal/domain/actor"
 	"github.com/shezw/panvara/internal/domain/project"
 )
 
@@ -48,13 +50,16 @@ func TestServiceCreateNormalizesAndPersistsValidatorOutput(t *testing.T) {
 			References: []Reference{{Field: "owner", TargetResource: "user", TargetID: targetID}},
 		}, nil
 	})
-	service, err := NewService(store, validator, fixedClock{at: at}, fixedIDGenerator{id: recordID})
+	service, err := NewService(
+		store, validator, allowAuthorizer{}, fixedClock{at: at}, fixedIDGenerator{id: recordID},
+	)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 
 	created, err := service.Create(
-		context.Background(), scope, SurfaceAdmin, json.RawMessage(`{"ignored":"source"}`),
+		context.Background(), testExecution(t, scope, SurfaceAdmin), scope,
+		json.RawMessage(`{"ignored":"source"}`),
 	)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -84,6 +89,7 @@ func TestServiceUpdatePreservesOptimisticConflict(t *testing.T) {
 	service, err := NewService(
 		store,
 		validator,
+		allowAuthorizer{},
 		fixedClock{at: time.Date(2026, time.July, 14, 9, 0, 0, 0, time.UTC)},
 		fixedIDGenerator{id: id},
 	)
@@ -92,7 +98,8 @@ func TestServiceUpdatePreservesOptimisticConflict(t *testing.T) {
 	}
 
 	_, err = service.Update(
-		context.Background(), scope, id, 3, SurfacePublic, json.RawMessage(`{"name":"Grace"}`),
+		context.Background(), testExecution(t, scope, SurfacePublic), scope, id, 3,
+		json.RawMessage(`{"name":"Grace"}`),
 	)
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("Update() error = %v, want ErrVersionConflict", err)
@@ -111,20 +118,22 @@ func TestServiceListAppliesBoundedDefault(t *testing.T) {
 		validatorFunc(func(_ context.Context, input ValidationInput) (ValidatedData, error) {
 			return ValidatedData{Data: input.Data}, nil
 		}),
+		allowAuthorizer{},
 		fixedClock{},
 		fixedIDGenerator{},
 	)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
-	if _, err := service.List(context.Background(), scope, SurfaceAdmin, ListOptions{}); err != nil {
+	admin := testExecution(t, scope, SurfaceAdmin)
+	if _, err := service.List(context.Background(), admin, scope, ListOptions{}); err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
 	if store.listed.Limit != DefaultListLimit {
 		t.Fatalf("ListOptions.Limit = %d, want %d", store.listed.Limit, DefaultListLimit)
 	}
 	if _, err := service.List(
-		context.Background(), scope, SurfaceAdmin, ListOptions{Limit: MaxListLimit + 1},
+		context.Background(), admin, scope, ListOptions{Limit: MaxListLimit + 1},
 	); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("List() error = %v, want ErrInvalidArgument", err)
 	}
@@ -143,13 +152,15 @@ func TestServiceListSortsFiltersAndBindsCursor(t *testing.T) {
 		validatorFunc(func(_ context.Context, input ValidationInput) (ValidatedData, error) {
 			return ValidatedData{Data: input.Data}, nil
 		}),
+		allowAuthorizer{},
 		fixedClock{},
 		fixedIDGenerator{},
 	)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
-	result, err := service.List(context.Background(), scope, SurfacePublic, ListOptions{
+	public := testExecution(t, scope, SurfacePublic)
+	result, err := service.List(context.Background(), public, scope, ListOptions{
 		Filters: []ListFilter{
 			{Field: "status", Value: "open"},
 			{Field: "email", Value: "ada@example.com"},
@@ -167,7 +178,7 @@ func TestServiceListSortsFiltersAndBindsCursor(t *testing.T) {
 
 	wrongCursor := *result.Next
 	wrongCursor.QueryHash = "sha256:" + strings.Repeat("0", 64)
-	if _, err := service.List(context.Background(), scope, SurfacePublic, ListOptions{
+	if _, err := service.List(context.Background(), public, scope, ListOptions{
 		Cursor: &wrongCursor,
 		Filters: []ListFilter{
 			{Field: "status", Value: "open"},
@@ -177,7 +188,7 @@ func TestServiceListSortsFiltersAndBindsCursor(t *testing.T) {
 		t.Fatalf("List(cursor mismatch) error = %v, want ErrInvalidArgument", err)
 	}
 	otherScope := testScope(t, "contact")
-	if _, err := service.List(context.Background(), otherScope, SurfacePublic, ListOptions{
+	if _, err := service.List(context.Background(), public, otherScope, ListOptions{
 		Cursor: result.Next,
 		Filters: []ListFilter{
 			{Field: "status", Value: "open"},
@@ -214,6 +225,7 @@ func TestServiceUpdateMergesTopLevelPatchBeforeValidation(t *testing.T) {
 	service, err := NewService(
 		store,
 		validator,
+		allowAuthorizer{},
 		fixedClock{at: time.Date(2026, time.July, 14, 9, 0, 0, 0, time.UTC)},
 		fixedIDGenerator{id: id},
 	)
@@ -222,7 +234,7 @@ func TestServiceUpdateMergesTopLevelPatchBeforeValidation(t *testing.T) {
 	}
 
 	_, err = service.Update(
-		context.Background(), scope, id, 2, SurfacePublic,
+		context.Background(), testExecution(t, scope, SurfacePublic), scope, id, 2,
 		json.RawMessage(`{"name":"Grace","profile":{"country":"US"}}`),
 	)
 	if err != nil {
@@ -242,6 +254,7 @@ func TestServiceUpdateRejectsExplicitNull(t *testing.T) {
 		validatorFunc(func(_ context.Context, input ValidationInput) (ValidatedData, error) {
 			return ValidatedData{Data: input.Data}, nil
 		}),
+		allowAuthorizer{},
 		fixedClock{},
 		fixedIDGenerator{id: id},
 	)
@@ -249,14 +262,15 @@ func TestServiceUpdateRejectsExplicitNull(t *testing.T) {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	_, err = service.Update(
-		context.Background(), scope, id, 2, SurfacePublic, json.RawMessage(`{"name":null}`),
+		context.Background(), testExecution(t, scope, SurfacePublic), scope, id, 2,
+		json.RawMessage(`{"name":null}`),
 	)
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("Update() error = %v, want ErrInvalidArgument", err)
 	}
 }
 
-func TestServiceWriteSurfaceFailsClosed(t *testing.T) {
+func TestServiceExecutionSurfaceFailsClosed(t *testing.T) {
 	t.Parallel()
 	scope := testScope(t, "lead")
 	id := testRecordID(t, "01981234-5678-7abc-8def-0123456789ac")
@@ -265,14 +279,130 @@ func TestServiceWriteSurfaceFailsClosed(t *testing.T) {
 		validatorFunc(func(_ context.Context, input ValidationInput) (ValidatedData, error) {
 			return ValidatedData{Data: input.Data}, nil
 		}),
+		allowAuthorizer{},
 		fixedClock{},
 		fixedIDGenerator{id: id},
 	)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
-	if _, err := service.Create(context.Background(), scope, "", json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("Create() error = %v, want ErrInvalidArgument", err)
+	if _, err := service.Create(
+		context.Background(), access.Execution{}, scope, json.RawMessage(`{}`),
+	); !errors.Is(err, access.ErrInvalidRequest) {
+		t.Fatalf("Create() error = %v, want ErrInvalidRequest", err)
+	}
+}
+
+func TestServiceAuthorizationDenialPreventsRecordDependencies(t *testing.T) {
+	t.Parallel()
+	scope := testScope(t, "lead")
+	store := &fakeStore{}
+	validator := &spyValidator{}
+	service, err := NewService(
+		store,
+		validator,
+		authorizerFunc(func(context.Context, access.Execution, access.Operation) error {
+			return access.ErrForbidden
+		}),
+		fixedClock{},
+		fixedIDGenerator{},
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	_, err = service.List(
+		context.Background(), testExecution(t, scope, SurfaceAdmin), scope, ListOptions{},
+	)
+	if !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("List() error = %v, want ErrForbidden", err)
+	}
+	if store.calls != 0 || validator.calls != 0 {
+		t.Fatalf("denied dependencies called: store=%d validator=%d", store.calls, validator.calls)
+	}
+}
+
+func TestServiceBindsEveryRecordUseCaseToItsExactAccessOperation(t *testing.T) {
+	t.Parallel()
+	scope := testScope(t, "lead")
+	id := testRecordID(t, "01981234-5678-7abc-8def-0123456789ac")
+
+	tests := []struct {
+		name      string
+		operation access.Operation
+		invoke    func(*Service, access.Execution) error
+	}{
+		{
+			name: "create", operation: access.OperationRecordCreate,
+			invoke: func(service *Service, execution access.Execution) error {
+				_, err := service.Create(context.Background(), execution, scope, json.RawMessage(`{}`))
+				return err
+			},
+		},
+		{
+			name: "get", operation: access.OperationRecordGet,
+			invoke: func(service *Service, execution access.Execution) error {
+				_, err := service.Get(context.Background(), execution, scope, id)
+				return err
+			},
+		},
+		{
+			name: "list", operation: access.OperationRecordList,
+			invoke: func(service *Service, execution access.Execution) error {
+				_, err := service.List(context.Background(), execution, scope, ListOptions{})
+				return err
+			},
+		},
+		{
+			name: "patch", operation: access.OperationRecordPatch,
+			invoke: func(service *Service, execution access.Execution) error {
+				_, err := service.Update(
+					context.Background(), execution, scope, id, 1, json.RawMessage(`{}`),
+				)
+				return err
+			},
+		},
+		{
+			name: "delete", operation: access.OperationRecordDelete,
+			invoke: func(service *Service, execution access.Execution) error {
+				_, err := service.Delete(context.Background(), execution, scope, id, 1)
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			store := &fakeStore{}
+			validator := &spyValidator{}
+			var got access.Operation
+			service, err := NewService(
+				store,
+				validator,
+				authorizerFunc(func(_ context.Context, _ access.Execution, operation access.Operation) error {
+					got = operation
+					return access.ErrForbidden
+				}),
+				fixedClock{},
+				fixedIDGenerator{},
+			)
+			if err != nil {
+				t.Fatalf("NewService() error = %v", err)
+			}
+			if err := test.invoke(service, testExecution(t, scope, SurfaceAdmin)); !errors.Is(err, access.ErrForbidden) {
+				t.Fatalf("%s error = %v, want ErrForbidden", test.name, err)
+			}
+			if got != test.operation {
+				t.Fatalf("%s operation = %q, want %q", test.name, got, test.operation)
+			}
+			if store.calls != 0 || validator.calls != 0 {
+				t.Fatalf(
+					"%s denied dependencies called: store=%d validator=%d",
+					test.name, store.calls, validator.calls,
+				)
+			}
+		})
 	}
 }
 
@@ -298,6 +428,38 @@ func testRecordID(t *testing.T, value string) ID {
 	return id
 }
 
+func testExecution(t *testing.T, recordScope Scope, surface Surface) access.Execution {
+	t.Helper()
+	environmentID, err := project.ParseEnvironmentID("01981234-5678-7abc-8def-0123456789fe")
+	if err != nil {
+		t.Fatalf("ParseEnvironmentID() error = %v", err)
+	}
+	projectScope, err := project.NewScope(recordScope.ProjectID, environmentID)
+	if err != nil {
+		t.Fatalf("project.NewScope() error = %v", err)
+	}
+	var subject actor.Context
+	var accessSurface access.Surface
+	switch surface {
+	case SurfacePublic:
+		subject, err = actor.NewAnonymous(recordScope.ProjectID.String())
+		accessSurface = access.SurfacePublic
+	case SurfaceAdmin:
+		subject, err = actor.New(recordScope.ProjectID.String(), "test-admin", nil)
+		accessSurface = access.SurfaceAdmin
+	default:
+		t.Fatalf("unsupported test surface %q", surface)
+	}
+	if err != nil {
+		t.Fatalf("construct test actor: %v", err)
+	}
+	execution, err := access.NewExecution(projectScope, subject, accessSurface)
+	if err != nil {
+		t.Fatalf("access.NewExecution() error = %v", err)
+	}
+	return execution
+}
+
 type validatorFunc func(context.Context, ValidationInput) (ValidatedData, error)
 
 func (function validatorFunc) Validate(ctx context.Context, input ValidationInput) (ValidatedData, error) {
@@ -306,6 +468,41 @@ func (function validatorFunc) Validate(ctx context.Context, input ValidationInpu
 
 func (validatorFunc) ValidateList(_ context.Context, input ListValidationInput) ([]ListFilter, error) {
 	return append([]ListFilter(nil), input.Filters...), nil
+}
+
+func (validatorFunc) AuthorizeOperation(context.Context, OperationValidationInput) error { return nil }
+
+type allowAuthorizer struct{}
+
+func (allowAuthorizer) Authorize(context.Context, access.Execution, access.Operation) error {
+	return nil
+}
+
+type authorizerFunc func(context.Context, access.Execution, access.Operation) error
+
+func (function authorizerFunc) Authorize(
+	ctx context.Context,
+	execution access.Execution,
+	operation access.Operation,
+) error {
+	return function(ctx, execution, operation)
+}
+
+type spyValidator struct{ calls int }
+
+func (validator *spyValidator) AuthorizeOperation(context.Context, OperationValidationInput) error {
+	validator.calls++
+	return nil
+}
+
+func (validator *spyValidator) Validate(context.Context, ValidationInput) (ValidatedData, error) {
+	validator.calls++
+	return ValidatedData{}, nil
+}
+
+func (validator *spyValidator) ValidateList(context.Context, ListValidationInput) ([]ListFilter, error) {
+	validator.calls++
+	return nil, nil
 }
 
 type fixedClock struct {
@@ -326,6 +523,7 @@ func (generator fixedIDGenerator) New(time.Time) (ID, error) {
 }
 
 type fakeStore struct {
+	calls      int
 	created    CreateCommand
 	updated    UpdateCommand
 	deleted    DeleteCommand
@@ -336,6 +534,7 @@ type fakeStore struct {
 }
 
 func (store *fakeStore) Create(_ context.Context, command CreateCommand) (Record, error) {
+	store.calls++
 	store.created = command
 	return Record{
 		Scope: command.Scope, ID: command.ID, Version: 1, Data: command.Data,
@@ -344,6 +543,7 @@ func (store *fakeStore) Create(_ context.Context, command CreateCommand) (Record
 }
 
 func (store *fakeStore) Get(_ context.Context, scope Scope, id ID) (Record, error) {
+	store.calls++
 	if store.getRecord.ID.Valid() {
 		return store.getRecord, nil
 	}
@@ -351,11 +551,13 @@ func (store *fakeStore) Get(_ context.Context, scope Scope, id ID) (Record, erro
 }
 
 func (store *fakeStore) List(_ context.Context, _ Scope, options ListOptions) (ListResult, error) {
+	store.calls++
 	store.listed = options
 	return store.listResult, nil
 }
 
 func (store *fakeStore) Update(_ context.Context, command UpdateCommand) (Record, error) {
+	store.calls++
 	store.updated = command
 	if store.updateErr != nil {
 		return Record{}, store.updateErr
@@ -367,6 +569,7 @@ func (store *fakeStore) Update(_ context.Context, command UpdateCommand) (Record
 }
 
 func (store *fakeStore) Delete(_ context.Context, command DeleteCommand) (Record, error) {
+	store.calls++
 	store.deleted = command
 	deletedAt := command.At
 	return Record{

@@ -45,8 +45,8 @@ func NewBootstrapAdminAuth(token string, adminActor actor.Context) (*BootstrapAd
 	if strings.TrimSpace(token) != token || strings.ContainsAny(token, "\r\n\t ") {
 		return nil, fmt.Errorf("bootstrap admin token must not contain whitespace")
 	}
-	if !adminActor.Valid() || adminActor.Anonymous() || !adminActor.HasRole("project.owner") {
-		return nil, fmt.Errorf("bootstrap administrator must be an authenticated project.owner actor")
+	if !adminActor.Valid() || adminActor.Anonymous() {
+		return nil, fmt.Errorf("bootstrap administrator must be an authenticated actor")
 	}
 	return &BootstrapAdminAuth{digest: sha256.Sum256([]byte(token)), actor: adminActor}, nil
 }

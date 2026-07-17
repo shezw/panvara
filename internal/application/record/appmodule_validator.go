@@ -34,6 +34,41 @@ type CompiledModuleValidator struct {
 	module *appmodule.CompiledModule
 }
 
+// AuthorizeOperation checks the resource operation allowlist for the exact
+// immutable module revision selected by a record use case.
+func (validator *CompiledModuleValidator) AuthorizeOperation(
+	ctx context.Context,
+	input OperationValidationInput,
+) error {
+	if validator == nil || validator.module == nil {
+		return fmt.Errorf("%w: uninitialized compiled module validator", ErrInvalidArgument)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := input.Scope.Validate(); err != nil {
+		return err
+	}
+	if !input.Surface.Valid() || !input.Operation.Valid() {
+		return fmt.Errorf("%w: invalid record policy context", ErrInvalidArgument)
+	}
+	if input.Scope.ModuleName != validator.module.Name() ||
+		input.Scope.RevisionHash != validator.module.RevisionHash() {
+		return fmt.Errorf("%w: compiled module revision does not match record scope", ErrInvalidArgument)
+	}
+	domainOperation, ok := compiledOperation(input.Operation)
+	if !ok {
+		return fmt.Errorf("%w: unsupported record operation", ErrInvalidArgument)
+	}
+	_, policy, found := compiledListAccess(
+		validator.module.Descriptor(), input.Scope.ResourceName, input.Surface,
+	)
+	if !found || !containsDomainOperation(policy.Operations, domainOperation) {
+		return ErrOperationForbidden
+	}
+	return nil
+}
+
 // ValidateList authorizes declared equality filters for one API surface and
 // normalizes each scalar to PostgreSQL jsonb ->> text representation.
 func (validator *CompiledModuleValidator) ValidateList(
@@ -55,6 +90,11 @@ func (validator *CompiledModuleValidator) ValidateList(
 	}
 	if len(input.Filters) > MaxListFilters {
 		return nil, fmt.Errorf("%w: too many list filters", ErrInvalidArgument)
+	}
+	if err := validator.AuthorizeOperation(ctx, OperationValidationInput{
+		Scope: input.Scope, Surface: input.Surface, Operation: OperationList,
+	}); err != nil {
+		return nil, err
 	}
 
 	resource, access, found := compiledListAccess(
@@ -211,6 +251,23 @@ func compiledMutation(mutation Mutation) (appmodule.Mutation, bool) {
 		return appmodule.MutationCreate, true
 	case MutationPatch:
 		return appmodule.MutationPatch, true
+	default:
+		return "", false
+	}
+}
+
+func compiledOperation(operation Operation) (domain.Operation, bool) {
+	switch operation {
+	case OperationCreate:
+		return domain.OperationCreate, true
+	case OperationGet:
+		return domain.OperationGet, true
+	case OperationList:
+		return domain.OperationList, true
+	case OperationPatch:
+		return domain.OperationPatch, true
+	case OperationDelete:
+		return domain.OperationDelete, true
 	default:
 		return "", false
 	}

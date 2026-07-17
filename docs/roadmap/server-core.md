@@ -15,14 +15,14 @@
 # Server Core 可执行路线图
 
 ::: danger 当前不是 Server Core 完成
-当前代码只达到 **runnable-slice（可运行纵向切片）**：它证明了单 Project、单 AppModule 下的严格声明编译、固定 Revision JSONB CRUD、bootstrap Revision 登记，以及 Draft → Validate → Plan 可以贯通。
+当前代码只达到 **runnable-slice（可运行纵向切片）**：它证明了单 Project、单 AppModule 下的严格声明编译、固定 Revision JSONB CRUD、bootstrap Revision 登记、Draft → Validate → Plan，以及 P0-01a 的单默认 Environment + Application Access Kernel 可以贯通。
 
-它没有 Publish、Activate、Rollback、数据迁移执行、完整授权、审计、Outbox、Worker、Provider Runtime、活动版本恢复或多节点收敛。任何状态页都不得把当前阶段标为“Server 开发完成”。
+完整 P0-01 仍未完成；当前没有 Credential/Account/Membership/Record Owner 生命周期、真正的多 Environment 事实隔离，也没有 Release/Migration/Provider 用例授权。Publish、Activate、Rollback、数据迁移执行、审计、Outbox、Worker、Provider Runtime、活动版本恢复与多节点收敛同样不存在。任何状态页都不得把当前阶段标为“Server 开发完成”。
 :::
 
 本页定义 Server Core 的能力边界、成熟度术语、核心模型、分阶段待办和验收门禁。它是计划与完成口径，不会因为文档中列出了某项能力就自动表示该能力已经实现。
 
-相关背景见[总体架构](../arch.md)、[Core v0 边界](../core-v0.md)、[不可变 Revision Registry](../adr/0002-immutable-revision-registry.md)和[Draft/Validation/Plan](../adr/0003-draft-validation-change-plan.md)。
+相关背景见[总体架构](../arch.md)、[Core v0 边界](../core-v0.md)、[不可变 Revision Registry](../adr/0002-immutable-revision-registry.md)、[Draft/Validation/Plan](../adr/0003-draft-validation-change-plan.md)和[持久化执行作用域与 Access Kernel](../adr/0004-persistent-execution-scope-access-kernel.md)。
 
 ## 1. 当前真实基线
 
@@ -33,7 +33,11 @@ flowchart LR
     Source["启动配置中的单个 Source"] --> Compile["严格解码与编译"]
     Compile --> Registry["登记 bootstrap Revision"]
     Compile --> Runtime["固定启动 Runtime"]
-    Runtime --> CRUD["PostgreSQL flex Record CRUD"]
+    Scope["0004: Project + default Environment<br/>Principal + project.owner Grant"] --> Kernel["Application Access Kernel"]
+    Runtime --> Kernel
+    Kernel --> CRUD["PostgreSQL flex Record CRUD"]
+    Kernel --> RegistryRead["Revision: 3 read use cases"]
+    Kernel --> DraftUseCases["Draft: 8 use cases"]
 
     Candidate["候选 raw Source"] --> Draft["Draft + generation"]
     Draft --> Validate["不可变 Validation"]
@@ -43,11 +47,13 @@ flowchart LR
 
 真实代码边界包括：
 
-- `cmd/panvara/server_runtime.go` 只装配一个 Project、一个编译后的 AppModule、一个 PostgreSQL Pool 和一个 HTTP Router。
+- `cmd/panvara/server_runtime.go` 只装配一个由启动配置定义并与数据库核对的 Project、一个持久化默认 Environment、一个编译后的 AppModule、一个 PostgreSQL Pool 和一个 HTTP Router。
 - `db/migrations/0001_flex_record.sql` 只建立 Record、Unique 和 Reference 数据结构。
 - `db/migrations/0002_module_revision_registry.sql` 建立不可变 bootstrap Revision 事实库，但没有发布或活动状态。
 - `db/migrations/0003_module_draft_workflow.sql` 建立 Draft、Validation 和 Plan，但明确不执行迁移。
-- `internal/application/record` 的用例只接收 `Scope` 和 `Surface`，尚未接收 Actor；Record 授权仍主要依赖 HTTP Adapter。
+- `db/migrations/0004_project_environment_access.sql` 追加 Project、Environment、Principal 与固定 `project.owner` Grant；它不向 `0001`–`0003` 的事实表增加 `environment_id`。
+- `internal/application/access` 以完整 `Execution` 和持久化 Grant 授权现有 Record 5、Revision 3、Draft 8 个用例；Record 随后继续执行 AppModule Operation Policy。
+- Access Kernel 只接受 active 的默认 Environment。它阻断非默认 Environment，但不构成多 Environment 事实隔离。
 - `internal/application/appmodule/manager_schema.go` 只生成前端可消费的 JSON 描述，不是 Manager 应用。
 
 当前可确认的成果是“这条窄链路可以运行并被测试”，而不是“通用服务端的核心模型和基础能力已经齐备”。
@@ -70,6 +76,7 @@ flowchart LR
 | 对象 | 当前成熟度 | 说明 |
 | --- | --- | --- |
 | Server Core | `runnable-slice` | 已验证单项目、单模块 CRUD 与变更准备链路 |
+| P0-01a Project/Access | `runnable-slice` | 已完成单默认 Environment 与现有 16 个用例的 Application 授权；完整 P0-01 未完成 |
 | Worker Runtime | `planned` | 没有 Outbox、Job、Lease、Retry 或 Worker 进程 |
 | Provider Runtime/Adapter | `planned` | Capability 目前只是声明字符串 |
 | Manager 产品 | `planned` | UI Schema 生成器可运行，但 Manager Web 不存在 |
@@ -101,8 +108,8 @@ Manager 不能成为所有后端缺口的容器。每种能力必须只有一个
 
 | 模型边界 | 核心模型 | 当前状态 | 需要补齐的不变量 |
 | --- | --- | --- | --- |
-| Project/Environment | `ProjectID`、`ProjectKey`、`Project`、`EnvironmentID`、`Environment`、`ProjectSettingsRevision`、`EnvironmentSettingsRevision`、`ProjectContext` | ID/Key/Context 仅由启动配置构造；没有 Environment 事实 | Project 与 Environment 身份稳定、设置可版本化、数据/Release/Provider 明确归属、每个用例显式携带二者 |
-| Access | `Principal`、`Account`、`ExternalIdentity`、`Session`、`ServiceAccount`、`ProjectMembership`、`RoleGrant/Policy`、`APICredential`、`RecordOwner` | 只有临时 `ActorContext` 与 bootstrap owner | 跨项目/环境拒绝、最小权限、撤销/轮换、外部身份不按 Email 自动合并、Application 层强制授权 |
+| Project/Environment | `ProjectID`、`ProjectKey`、`Project`、`EnvironmentID`、`Environment`、`ProjectSettingsRevision`、`EnvironmentSettingsRevision`、`ProjectContext` | Project 与一个默认 Environment 已持久化；Runtime 仍从启动配置构造 Context 后核对数据库；既有事实没有 `environment_id` | 设置 Revision、Environment 生命周期，以及数据/Release/Provider 的真实 Environment 归属与隔离 |
+| Access | `Principal`、`Account`、`ExternalIdentity`、`Session`、`ServiceAccount`、`ProjectMembership`、`RoleGrant/Policy`、`APICredential`、`RecordOwner` | 固定 `bootstrap-admin` Principal、固定 `project.owner` Grant 与 Application Access Kernel 已实现；Token 认证仍是进程内 bootstrap 机制 | Account/Credential/Membership 生命周期、动态策略、Owner/字段规则、Grant 管理与审计；未来用例继续接入 Kernel |
 | 全球化原语 | `Locale`、`TimeZone`、`CurrencyDefinition`、`Money` | Time Zone 有真实校验；Locale/Currency 主要校验形状 | BCP 47 语义、版本化 ISO 4217、minor-unit exponent、UTC 持久化 |
 | AppModule 声明 | `Descriptor`、`Resource`、`Field`、`Constraint`、`Access`、`ManagerView`、模块依赖 | v1alpha1 子集已实现 | 协议版本转换、稳定字段身份、角色/Owner 策略、受控 Action/Event |
 | 编译制品 | `CanonicalIR`、`ModuleRevision`、`DataSchemaIdentity`、`SourceIdentity`、OpenAPI、Manager Schema | bootstrap Revision 已实现 | 每种身份独立版本化、制品可复验、历史只追加 |
@@ -145,7 +152,7 @@ Manager 不能成为所有后端缺口的容器。每种能力必须只有一个
 
 ```mermaid
 flowchart TB
-    Access["Project + Access Kernel"] --> Authorized["所有 Use Case 授权"]
+    Access["P0-01a: default Scope + Access Kernel"] --> Authorized["完整 P0-01: 所有当前与未来 Use Case 授权"]
     Authorized --> Release["Release 状态机"]
     Release --> Migration["Migration 执行"]
     Migration --> Runtime["Snapshot/Epoch Runtime"]
@@ -170,10 +177,12 @@ flowchart TB
 
 P0 是进入 `feature-complete` 的必要条件，优先级高于完整 Manager UI。
 
-- [ ] **P0-01：持久化 Project/Environment 与最小 Access Kernel**
-  - 交付：Project、Environment、Principal/ServiceAccount、Membership、Role Grant、API Credential 摘要、Record Owner；所有 Application Use Case 显式接收 `Project + Environment + Actor + Surface + Operation`。
-  - 验收门禁：绕开 HTTP 直接调用 Application 时，跨 Project、跨 Environment、缺角色、越 Owner、已撤销凭据均被拒绝；授权负例覆盖 Record、Revision、Draft、Release、Migration 和 Provider 操作；数据库和日志没有明文 Token。
-  - 不能误判完成：只给 Manager 加路由守卫、只保留当前 bootstrap Bearer Token，或只在 HTTP Middleware 检查角色，都不能算完成。
+- [ ] **P0-01：持久化 Project/Environment 与最小 Access Kernel（完整项未完成）**
+  - [x] **P0-01a：单默认 Environment 的持久化执行作用域与现有用例授权。** Migration `0004` 持久化 Project、一个 bootstrap 默认 Environment、`bootstrap-admin` Principal 与固定 `project.owner` Grant；`Execution` 显式携带 Project + Environment + Actor + Surface，各 Application 用例内部固定 Operation。Record 5、Revision 3、Draft 8 个用例已接入同一 Access Kernel，Actor 自报 Role 不参与决策，撤销 Grant 后重启不会恢复。证据见 [ADR-0004](../adr/0004-persistent-execution-scope-access-kernel.md) 与[当前架构事实](../architecture-review-server-current.md)。
+  - [ ] **完整 P0-01 剩余：** 持久化 Credential 摘要、轮换与撤销；Account/External Identity/Session、Membership、Service Account/API Key 生命周期；动态 Role/Policy 与 Grant 管理；Record Owner、字段/动作级策略；为 Record/Revision/Draft 等既有事实补齐 `environment_id`、回填、复合约束、游标、幂等键与回滚验证；把 Release、Migration、Provider 以及后续 Job/Event 用例接入 Access Kernel。
+  - 当前门禁边界：P0-01a 能拒绝跨 Project Actor、非默认 Environment、缺失/撤销 Owner Grant与权威状态读取失败；因为既有事实没有 Environment Key，这不是已验证的跨 Environment 数据隔离。当前 Token 也不是持久化 Credential。
+  - 完整验收门禁：绕开 HTTP 直接调用 Application 时，跨 Project、跨 Environment、缺角色、越 Owner、已撤销凭据均被拒绝；授权负例覆盖 Record、Revision、Draft、Release、Migration 和 Provider 操作；数据库和日志没有明文 Token。
+  - 不能误判完成：只持久化一个默认 Environment、只保留当前 bootstrap Bearer Token，或仅完成现有 16 个用例授权，都不能把完整 P0-01 标为完成。
 
 - [ ] **P0-02：Publish/Activate/Rollback 状态机**
   - 交付：Published Revision、Module Release、Project Release Snapshot、Environment 作用域的 active pointer、单调 epoch、Rollback Eligibility/Record；Publish 只能消费精确且未 stale 的有效 Validation/Plan。每次 Release 必须在 Activate 前固化 `pointer-only`、`forward-fix`、`reverse-migration` 或 `backup-restore` 恢复策略及适用窗口。
@@ -356,7 +365,8 @@ Manager Web 的独立部署不是领域拆分。可选 Manager BFF 只能负责 
 | 能生成 Manager UI Schema | 前端描述制品可生成 | 没有 Manager 应用，也没有补齐服务端规则 |
 | Registry 保存了 Revision | 历史编译事实可复验 | 没有 Publish、active pointer 或 Runtime 切换 |
 | Change Plan 能识别风险 | 变化解释算法可运行 | 没有数据复制、约束重建、checkpoint 和恢复 |
-| Bearer Token 使用 SHA-256 摘要比较 | 一个临时共享凭据不以明文保存在验证器中 | 没有账号、Membership、撤销、轮换和 Application 全面授权 |
+| Bearer Token 使用 SHA-256 摘要比较 | 一个临时共享凭据不以明文保存在验证器中 | 没有持久化 Credential、账号、Membership、凭据撤销与轮换；P0-01a 授权不等于完整 IAM |
+| 数据库有 Environment 表且 `Execution` 带 Environment | 默认 Environment 身份稳定，非默认 Scope 被拒绝 | 既有业务事实没有 `environment_id`，不能宣称多 Environment 数据隔离 |
 | `requires.capabilities` 进入 IR | 声明和 Hash 稳定 | 没有 Provider 解析、Binding、Credential、健康和调用 |
 | 创建了 Outbox 表 | 有保存消息的结构 | 没有同事务写入、claim、Lease、重试、去重和恢复 |
 | 单元测试和 Mock 全绿 | 局部规则内部一致 | 没有真实 PostgreSQL、Worker、Provider 和故障语义证据 |

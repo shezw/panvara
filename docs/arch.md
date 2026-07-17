@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/arch.md    2026-07-15
+    docs/arch.md    2026-07-18
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -23,7 +23,7 @@ Panvara 是一套数据模型驱动、可组合、面向全球第三方生态的
 - 单区域内从单机扩展到数百台内网服务器。
 - 从数千并发逐步扩展到十万、百万并发；容量必须由基准和压测证明，架构不预先承诺固定数字。
 - 远距离区域作为独立 Partition，暂不提供跨区强一致写入。
-- 默认单 Project、单 Environment 部署；多项目托管与跨环境总控是后续能力，不让首版背负完整 SaaS 多租户复杂度。
+- 默认单 Project、一个持久化默认 Environment 部署；当前既有业务事实仍没有 `environment_id`，多项目托管与多 Environment 数据隔离都是后续能力，不让首版背负完整 SaaS 多租户复杂度。
 
 ## 2. 架构判断
 
@@ -33,15 +33,20 @@ Panvara 采用“模块化单体优先、按运行角色拆分”的方式，而
 flowchart TB
     Client["App / Website / Admin / Partner API"]
     Edge["HTTP API / Auth / ProjectContext"]
+    Execution["Execution: Project + Environment + Actor + Surface"]
     App["Application Use Cases"]
+    Access["Application Access Kernel"]
     Domain["Domain + AppModule IR"]
     Ports["Ports: Store / Event / Provider / Cache"]
     Infra["PostgreSQL / NATS / Valkey / Object Storage"]
+    Grants["PostgreSQL Scope + Grant facts"]
     Providers["Global Providers"]
     Control["Manager Control Plane"]
 
     Client --> Edge
-    Edge --> App
+    Edge --> Execution --> App
+    App --> Access
+    Access --> Grants
     App --> Domain
     App --> Ports
     Ports --> Infra
@@ -130,6 +135,28 @@ alpha.3 采用 Draft → Validate → Plan → Publish → Activate 的阶段边
 
 完整 Module Revision、按 format 管理的 Data Schema Identity 与 Source Hash 是三类不同内容身份。Module Revision 是保存 Source、IR、生成物和首次 provenance 的不可变父制品；Data Schema Identity 是它下面的只追加派生身份。当前 format 1 只投影 Resource、Field、引用、enum 和数据约束，不包含 SemVer、标签、Manager、API、Capability 与依赖。未来新增算法会给同一父 Revision 追加新的 format，而不会改变父 Hash 或已有身份。当前 Record namespace 仍使用完整 Module Revision，Data Schema Identity 只是未来迁移规划的输入，详见 [ADR-0001](adr/0001-module-data-revision-identities.md)。
 
+### 4.1 当前执行作用域与授权边界
+
+P0-01a 在模块化单体内建立了最小、持久化的执行作用域。Migration `0004` 追加 Project、Environment、Principal 与 Access Grant；某个 Project ID 首次由 Server 装配时，原子创建一个默认 Environment、固定 `bootstrap-admin` Principal 和精确 `(project, environment, principal, project.owner)` Grant，同一 Project ID 后续重启复用并核对这些事实。新的 Project ID 与唯一 Key 会形成另一套隔离事实，但一个 Server 进程仍只装配一个 Project。Token 仍只是在进程内把请求认证为该 Principal，持久化 Grant 才决定 Admin 权限。
+
+```mermaid
+flowchart LR
+    Token["Bearer Token"] --> Identity["HTTP authentication"]
+    Identity --> Execution["Execution<br/>Project + Environment + Actor + Surface"]
+    Execution --> UseCase["Application use case<br/>fixed Operation"]
+    UseCase --> Kernel["Access Kernel"]
+    Kernel --> Reader["GrantReader"]
+    Reader --> Facts[("Project / default Environment<br/>Principal / project.owner Grant")]
+    Kernel -->|"deny, inactive, unavailable"| Rejected["Fail closed before business Store"]
+    Kernel -->|"Record allowed"| ModulePolicy["AppModule operation policy"]
+    Kernel -->|"Revision/Draft owner allowed"| Store["Application logic + Store"]
+    ModulePolicy --> Store
+```
+
+Record 的 List/Get/Create/Patch/Delete 5 个用例、Revision 的 List/Get/GetSource 3 个用例，以及 Draft 的 Create/Get/GetSource/Replace/Validate/Plan/GetValidation/GetPlan 8 个用例都在 Application 层固定 Operation 并调用同一个 Kernel。Public Surface 只能进入 Record Operation，Record 随后继续检查 AppModule Policy；Admin Surface 必须是非匿名 Actor，并在 active 默认 Scope 内拥有 active、未撤销的 `project.owner` Grant。Actor 自报 Role、未知 Operation 和授权存储故障都不能放行。
+
+这里的 Environment 是执行契约与授权查询的一部分，不是已完成的多 Environment 数据隔离。`0001`–`0003` 的 Record、Revision、Draft 表没有 `environment_id`，所以 Kernel 只接受默认 Environment，其他 Environment 必须拒绝。完整 P0-01 仍需 Credential/Account/Membership、动态 Role/Policy、Record Owner、既有事实的 Environment 回填与复合约束，以及 Release、Migration、Provider、Job/Event 用例授权。详见 [ADR-0004](adr/0004-persistent-execution-scope-access-kernel.md)。
+
 ## 5. 全球 Provider 体系
 
 Core 面向 Capability 编程，第三方厂商只是 Adapter。Provider 协议独立版本化，并要求超时、幂等、重试分类、凭据引用、审计和健康检查。
@@ -155,7 +182,7 @@ Core 面向 Capability 编程，第三方厂商只是 Adapter。Provider 协议�
 
 ## 6. 分布式管理
 
-alpha.3a 已建立单节点、项目隔离的 PostgreSQL 不可变 Revision 事实库；alpha.3b 在同一 Server 中增加可版本化 Draft 与不可变 Validation/Plan。它们通过 Application Port 保留未来拆到 Manager 的边界，但不会为了当前中小开发者场景先增加独立服务。以下发布状态与分布式收敛仍是后续目标，不是当前能力：
+alpha.3a 已建立单节点、项目隔离的 PostgreSQL 不可变 Revision 事实库；alpha.3b 在同一 Server 中增加可版本化 Draft 与不可变 Validation/Plan；P0-01a 又为这些现有用例和 Record 用例增加单默认 Environment 的持久化 Scope 与 Application 授权。它们通过 Application Port 保留未来拆到 Manager 的边界，但不会为了当前中小开发者场景先增加独立服务。以下发布状态与分布式收敛仍是后续目标，不是当前能力：
 
 - 数据面：无状态 API 节点和可水平扩展 Worker；请求显式携带 ProjectContext。
 - 控制面：Manager 管理模型、配置、Provider 引用和发布；产出不可变 Revision。
@@ -205,17 +232,17 @@ alpha.3a 已建立单节点、项目隔离的 PostgreSQL 不可变 Revision 事�
 
 ## 9. 当前落地与后续
 
-v0.1.0-alpha.2 已落地严格 YAML/JSON AppModule 解码、Canonical IR/Hash、OpenAPI、Manager UI Schema、flex JSONB Store、Public Create、Admin CRUD、等值过滤、Lite/Server Profile 和 PostgreSQL 18.4 必需集成门禁。当前开发分支继续落地 alpha.3a Registry，以及 alpha.3b 的 raw Source Draft、generation/ETag、创建幂等、结构化 Validation 和确定性 Change Plan。Distribution 仍保持 alpha.2。
+v0.1.0-alpha.2 已落地严格 YAML/JSON AppModule 解码、Canonical IR/Hash、OpenAPI、Manager UI Schema、flex JSONB Store、Public Create、Admin CRUD、等值过滤、Lite/Server Profile 和 PostgreSQL 18.4 必需集成门禁。当前开发分支继续落地 alpha.3a Registry、alpha.3b 的 raw Source Draft/Validation/Plan，以及 P0-01a 的持久化 Project、单默认 Environment、Principal/Owner Grant 和 Application Access Kernel。Distribution 仍保持 alpha.2。
 
-Server 每次启动仍从配置的 Source 计算当前 Revision，并在 migration 后、readiness 前幂等登记；登记不等于发布或激活。Draft/Validation/Plan 也不会改变这条启动链路。任何 Canonical IR 变化仍会形成全新的空数据命名空间；旧 Revision 的 Record、唯一值和引用完整保留且按 Revision 隔离，不迁移、不重绑。Registry List 顺序不表达当前运行版本，当前值只能从 OpenAPI 的 `x-panvara-revision` 读取。Publish/Activate 完成前，变更前仍须备份数据库；覆盖启动 Source 不是升级。
+Server 每次启动仍从配置的 Source 计算当前 Revision；migration 后先创建或核对持久化默认 Scope，再在 readiness 前幂等登记 Revision。Scope 初始化和登记都不等于发布或激活，Draft/Validation/Plan 也不会改变这条启动链路。任何 Canonical IR 变化仍会形成全新的空数据命名空间；旧 Revision 的 Record、唯一值和引用完整保留且按 Revision 隔离，不迁移、不重绑。Registry List 顺序不表达当前运行版本，当前值只能从 OpenAPI 的 `x-panvara-revision` 读取。Publish/Activate 完成前，变更前仍须备份数据库；覆盖启动 Source 不是升级。
 
 alpha.3 必须通过后续 ADR 定案迁移与激活协议：迁移任务显式且幂等，保留 `record_id`，在目标 namespace 重建 unique/reference 约束，校验成功后原子 Activate，失败或回滚继续使用旧 namespace；同时决定按 format 选择的 Data Schema Identity 如何参与 Record namespace 与迁移兼容判断。
 
-第二个 HTTP/gRPC/Worker 入口进入前，授权必须从 Interfaces 下沉到 Application：Use Case 显式接收并校验 Project、Actor、Surface 和 Operation，Interfaces 只负责认证材料转换与协议映射，不能成为唯一授权边界。
+P0-01a 已把现有 Record/Revision/Draft 用例授权下沉到 Application，并显式携带 Project/Environment Scope、Actor、Surface 与固定 Operation。完整 P0-01 仍需 Credential/Account/Membership、Record Owner、动态策略与真正的多 Environment 事实隔离；未来 Release、Migration、Provider、Job/Event 用例必须接入同一 Kernel，不能把当前 16 个用例的覆盖误写成全面授权完成。
 
 alpha.3 还必须验证业务写入与 Outbox 同事务、ProjectReleaseSnapshot + epoch 固定执行版本，并评估超过当前 512 字节唯一值边界时是否采用 Hash 索引加原值碰撞复核；这些都不是 alpha.2 已实现能力。
 
-尚未落地动态排序、Publish/Activate/Rollback、数据迁移执行、完整 Manager 应用、Outbox/Worker、Provider Runtime 和分布式进程。这些按 [Server Core 能力清单](roadmap/server-core.md) 逐步进入，而不是提前创建空实现；Manager 的全部页面、Server 前置契约与逐阶段验收见 [Manager 范围与验收](roadmap/manager.md)。
+尚未落地完整 P0-01、多 Environment 数据隔离、动态排序、Publish/Activate/Rollback、数据迁移执行、完整 Manager 应用、Outbox/Worker、Provider Runtime 和分布式进程。这些按 [Server Core 能力清单](roadmap/server-core.md) 逐步进入，而不是提前创建空实现；Manager 的全部页面、Server 前置契约与逐阶段验收见 [Manager 范围与验收](roadmap/manager.md)。
 
 当前代码事实与未来方案分开记录：[当前 Server 架构事实](architecture-review-server-current.md) 只陈述已经存在的实现，[Server Core 能力清单](roadmap/server-core.md) 与 [Manager 范围与验收](roadmap/manager.md) 才是后续待办。
 

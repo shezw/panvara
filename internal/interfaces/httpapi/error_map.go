@@ -19,6 +19,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/shezw/panvara/internal/application/access"
 	appmodule "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/application/record"
 )
@@ -32,6 +33,13 @@ func (handler *Handler) writeApplicationError(writer http.ResponseWriter, reques
 	switch {
 	case errors.As(err, &validation):
 		writeError(writer, request, http.StatusUnprocessableEntity, "validation_failed", "record validation failed", validation.Violations)
+	case errors.Is(err, access.ErrUnauthenticated):
+		writeError(writer, request, http.StatusUnauthorized, "unauthenticated", "authentication is required", nil)
+	case errors.Is(err, access.ErrForbidden), errors.Is(err, access.ErrScopeInactive),
+		errors.Is(err, record.ErrOperationForbidden):
+		writeError(writer, request, http.StatusForbidden, "forbidden", "operation is not allowed", nil)
+	case errors.Is(err, access.ErrUnavailable):
+		writeError(writer, request, http.StatusServiceUnavailable, "access_unavailable", "authorization is unavailable", nil)
 	case errors.Is(err, record.ErrInvalidArgument):
 		writeError(writer, request, http.StatusBadRequest, "invalid_argument", "request contains an invalid argument", nil)
 	case errors.Is(err, record.ErrNotFound):

@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shezw/panvara/internal/application/access"
 	appmodule "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/application/record"
 	"github.com/shezw/panvara/internal/domain/actor"
@@ -35,9 +36,10 @@ import (
 )
 
 const (
-	testProjectID = "018f7e93-7b2c-7abc-8def-1234567890ab"
-	testRecordID  = "018f7e93-7b2c-7abc-8def-1234567890ac"
-	testRevision  = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testProjectID     = "018f7e93-7b2c-7abc-8def-1234567890ab"
+	testEnvironmentID = "018f7e93-7b2d-7abc-8def-1234567890ab"
+	testRecordID      = "018f7e93-7b2c-7abc-8def-1234567890ac"
+	testRevision      = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 )
 
 func TestSchemaEndpoints(t *testing.T) {
@@ -498,7 +500,8 @@ func newTestHandlerWithModule(t *testing.T, module Module, records RecordService
 		t.Fatal(err)
 	}
 	handler, err := New(Config{
-		Project: projectContext, PublicActor: publicActor, Module: module, Records: records, AdminAuth: auth,
+		Project: projectContext, Scope: testProjectScope(t),
+		PublicActor: publicActor, Module: module, Records: records, AdminAuth: auth,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -544,47 +547,73 @@ type fakeRecordService struct {
 }
 
 func (service *fakeRecordService) Create(
-	ctx context.Context, scope record.Scope, surface record.Surface, body json.RawMessage,
+	ctx context.Context, execution access.Execution, scope record.Scope, body json.RawMessage,
 ) (record.Record, error) {
 	if service.create == nil {
 		return record.Record{}, errors.New("unexpected Create")
 	}
-	return service.create(ctx, scope, surface, body)
+	return service.create(ctx, scope, testRecordSurface(execution), body)
 }
-func (service *fakeRecordService) Get(ctx context.Context, scope record.Scope, id record.ID) (record.Record, error) {
+func (service *fakeRecordService) Get(
+	ctx context.Context, _ access.Execution, scope record.Scope, id record.ID,
+) (record.Record, error) {
 	if service.get == nil {
 		return record.Record{}, errors.New("unexpected Get")
 	}
 	return service.get(ctx, scope, id)
 }
 func (service *fakeRecordService) List(
-	ctx context.Context, scope record.Scope, surface record.Surface, options record.ListOptions,
+	ctx context.Context, execution access.Execution, scope record.Scope, options record.ListOptions,
 ) (record.ListResult, error) {
 	if service.list == nil {
 		return record.ListResult{}, errors.New("unexpected List")
 	}
-	return service.list(ctx, scope, surface, options)
+	return service.list(ctx, scope, testRecordSurface(execution), options)
 }
 func (service *fakeRecordService) Update(
 	ctx context.Context,
+	execution access.Execution,
 	scope record.Scope,
 	id record.ID,
 	expected uint64,
-	surface record.Surface,
 	patch json.RawMessage,
 ) (record.Record, error) {
 	if service.update == nil {
 		return record.Record{}, errors.New("unexpected Update")
 	}
-	return service.update(ctx, scope, id, expected, surface, patch)
+	return service.update(ctx, scope, id, expected, testRecordSurface(execution), patch)
 }
 func (service *fakeRecordService) Delete(
-	ctx context.Context, scope record.Scope, id record.ID, expected uint64,
+	ctx context.Context, _ access.Execution, scope record.Scope, id record.ID, expected uint64,
 ) (record.Record, error) {
 	if service.delete == nil {
 		return record.Record{}, errors.New("unexpected Delete")
 	}
 	return service.delete(ctx, scope, id, expected)
+}
+
+func testProjectScope(t *testing.T) project.Scope {
+	t.Helper()
+	projectID, err := project.ParseID(testProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environmentID, err := project.ParseEnvironmentID(testEnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := project.NewScope(projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scope
+}
+
+func testRecordSurface(execution access.Execution) record.Surface {
+	if execution.Surface() == access.SurfacePublic {
+		return record.SurfacePublic
+	}
+	return record.SurfaceAdmin
 }
 
 func makeTestRecord(t *testing.T, scope record.Scope, version uint64) record.Record {
@@ -618,7 +647,9 @@ func assertAdminIdentity(t *testing.T, ctx context.Context) {
 	t.Helper()
 	identity, ok := IdentityFromContext(ctx)
 	if !ok || identity.Actor.ActorID() != "bootstrap-admin" || !identity.Actor.HasRole("project.owner") ||
-		identity.Project.ID().String() != testProjectID {
+		identity.Project.ID().String() != testProjectID ||
+		identity.Scope.EnvironmentID().String() != testEnvironmentID ||
+		identity.Surface != access.SurfaceAdmin {
 		t.Fatalf("admin identity = %+v, ok = %v", identity, ok)
 	}
 }

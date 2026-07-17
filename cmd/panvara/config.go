@@ -23,15 +23,16 @@ import (
 )
 
 type serverConfig struct {
-	databaseURL   string
-	moduleSource  string
-	moduleFormat  string
-	projectID     string
-	projectKey    string
-	projectLocale string
-	projectZone   string
-	projectMoney  string
-	adminToken    string
+	databaseURL    string
+	moduleSource   string
+	moduleFormat   string
+	projectID      string
+	projectKey     string
+	projectLocale  string
+	projectZone    string
+	projectMoney   string
+	environmentKey string
+	adminToken     string
 }
 
 func (config serverConfig) validate() error {

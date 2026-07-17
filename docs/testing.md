@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/testing.md    2026-07-15
+    docs/testing.md    2026-07-18
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -20,20 +20,22 @@
 
 每个缺陷修复先增加可复现回归测试；随机测试和 Fuzz 发现的最小样本进入 corpus。禁止用自动重试掩盖 Flaky Test。
 
+当前门禁包含 **Server Core P0-01a 可运行切片**，只验证最小持久化执行作用域与 Owner Grant 授权闭环，不表示完整 P0-01、IAM 或多 Environment 数据隔离已经完成。
+
 ## 2. 分层测试
 
 | 层 | 目标 | 工具与方式 | 当前状态 |
 | --- | --- | --- | --- |
-| Domain | Money、ProjectContext、模型规则、模块图、不可变 Revision、版本化 Draft | testing、表驱动、property、fuzz | alpha.3b 增加 Draft 身份、Source 边界、generation 与 no-op 不变量 |
-| Application | Record 用例、校验、并发版本、Kernel 生命周期、Revision 复验、Draft/Validation/Plan | fake Port、失败注入、race | alpha.3b 增加 owner 授权、CAS、重放与确定性变化计划；发布仍待后续 |
-| HTTP | 状态码、JSON/raw Source、鉴权、错误信封、ETag、幂等、OpenAPI | httptest、契约断言 | alpha.2 CRUD + alpha.3a Registry + alpha.3b Draft Planning 契约 |
-| PostgreSQL | migration、事务、唯一/引用、分页、重启恢复、追加式 Registry/Validation/Plan | PostgreSQL 18.4 Service URL 或临时 Docker | alpha.3b 增加 Draft CAS、创建幂等和不可变派生事实 integration |
+| Domain | Money、ProjectContext、Environment Scope、模型规则、模块图、不可变 Revision、版本化 Draft | testing、表驱动、property、fuzz | P0-01a 增加 UUIDv7 Environment ID、精确 Scope/Execution 与跨 Project 拒绝；alpha.3b 增加 Draft 不变量 |
+| Application | Access Kernel、Record 用例、校验、并发版本、Kernel 生命周期、Revision 复验、Draft/Validation/Plan | fake Port、失败注入、race | P0-01a 固定 Operation、忽略 Actor 自报 Role、读取权威 Grant 并 fail closed；完整 IAM 仍待后续 |
+| HTTP | 状态码、JSON/raw Source、认证、授权错误信封、ETag、幂等、OpenAPI | httptest、契约断言 | alpha.2 CRUD + alpha.3a Registry + alpha.3b Draft Planning + P0-01a Execution 传递 |
+| PostgreSQL | migration、Project/Environment/Principal/Grant、事务、唯一/引用、分页、重启恢复、追加式 Registry/Validation/Plan | PostgreSQL 18.4 Service URL 或临时 Docker | P0-01a 增加并发 bootstrap、漂移/状态/约束与撤权持久性；alpha.3b 增加 Draft integration |
 | Provider | Adapter 是否满足 Capability | 共享 conformance suite | alpha.3 planned |
 | AppModule | 严格解码、IR、Data Schema Identity、OpenAPI、Manager Schema、恶意输入 | golden、fuzz、语义校验 | alpha.3a format 1 指纹差异矩阵已建立；迁移兼容矩阵待后续 alpha.3 |
-| Profile/E2E | Lite/Server 纵向闭环 | 真实 listener + PostgreSQL 18.4 | 原 CRUD、Registry 与 invalid → replace → valid → plan 共同验证；发布 E2E 待后续 |
+| Profile/E2E | Lite/Server 纵向闭环 | 真实 listener + PostgreSQL 18.4 | CRUD、Registry、Draft Plan 与 Grant 撤销即时生效/重启不恢复共同验证；完整 P0-01 和发布 E2E 待后续 |
 | Non-functional | race、benchmark、load、fault | Go race/bench + 专项压测 | 基础 race 已建立 |
 | Supply chain | 漏洞、SBOM、许可、签名 | govulncheck、生成/验证工具 | RC 前 |
-| Documentation | 模块指南、内部链接、静态站点、Golden Path | manifest contract、VitePress build、人工/E2E 复核 | alpha.2 已建立基础门禁 |
+| Documentation | 模块指南、内部链接、静态站点、Golden Path | manifest contract、VitePress build、人工/E2E 复核 | alpha.2 基础门禁同步覆盖 P0-01a 的能力与限制说明 |
 
 测试替身只能替代应用 Port；数据库语义、消息确认和 Provider 协议不可仅靠 Mock 宣称通过。
 
@@ -49,8 +51,8 @@ Docker-free 的 `make verify` 依次验证：
 
 独立 required integration Job 使用 Go 1.26.5 与 PostgreSQL 18.4 Service 执行 `make test-e2e`：
 
-1. `make test-integration` 验证 fresh/idempotent migration、带既有 Record/unique/reference/Registry 数据的逐版升级、Record 约束、Registry 不可变性，以及 Draft 创建重放、Source CAS/no-op、项目隔离、Validation/Plan 追加事实和重启恢复。
-2. `make test-server-smoke` 验证模块 Artifact、原有 CRUD/ETag/Record 持久化、Registry 重启事实，以及 raw-body invalid Draft → Replace → valid Validation → Plan 的真实 HTTP 旅程和全部无执行副作用断言。
+1. `make test-integration` 验证 fresh/idempotent migration、带既有 Record/unique/reference/Registry 数据的逐版升级、Record 与 Registry 约束、Draft 追加事实，以及 P0-01a 的 Project/Environment/Principal/Grant 首次 bootstrap、并发收敛、幂等重启、配置漂移、active 状态、非默认 Environment 拒绝、数据库约束和撤权后不自动补回。
+2. `make test-server-smoke` 验证模块 Artifact、CRUD/ETag/Record 持久化、Registry 重启事实、Draft → Validation → Plan 真实 HTTP 旅程，以及同一 Token 在 Owner Grant 撤销后立即被 Record/Revision/Draft Admin 用例拒绝、Server 重启后仍被拒绝。
 
 该 Job 同时设置 `PANVARA_TEST_DATABASE_URL` 与 `PANVARA_REQUIRE_DOCKER=1`；数据库不可用或版本不是 18.4 时必须失败，不能 Skip。Go 1.25.12 兼容 Job 只运行 vet、无 tag 的 unit 和 build，设置 `GOTOOLCHAIN=local`，不需要 Docker。
 
@@ -65,7 +67,7 @@ Docker-free 的 `make verify` 依次验证：
 - `make verify`。
 - PostgreSQL 18.4 Store integration 与 Server HTTP persistence smoke。
 - AppModule decode/compiler/record validation Fuzz seed、Canonical IR 与 Artifact golden。
-- Public/Admin HTTP 契约与 bootstrap admin 鉴权负例。
+- Public/Admin HTTP 契约、bootstrap Token 认证负例，以及持久化 Owner Grant 授权与撤权跨重启负例。
 
 OpenAPI breaking check、`govulncheck` 和供应链扫描仍需在 RC 前补齐。Provider conformance 不属于 alpha.2，因为当前没有 Provider Runtime。
 
@@ -86,7 +88,7 @@ OpenAPI breaking check、`govulncheck` 和供应链扫描仍需在 RC 前补齐�
 - SBOM、许可证、漏洞、镜像最小权限和签名检查。
 - 容量测试、长稳测试和恢复演练报告。
 
-## 5. alpha.2 已验证的高价值用例
+## 5. 当前已验证的高价值用例
 
 - AppModule 相同输入产生稳定 IR 和 Hash。
 - 未知字段类型、重复字段、坏引用、依赖缺失、冲突和环全部拒绝。
@@ -94,8 +96,13 @@ OpenAPI breaking check、`govulncheck` 和供应链扫描仍需在 RC 前补齐�
 - Kernel 部分启动失败按逆序回滚。
 - Money 禁止跨币种运算和 int64 溢出。
 - ProjectContext 拒绝无效 Locale、Time Zone 和 Currency。
+- Environment ID 可生成并解析有效 UUIDv7；Scope/Execution 保留精确 Project + Environment 边界并拒绝跨 Project Actor。
 - fresh 数据库可迁移，重复执行 migration 无副作用。
-- Public/Admin 权限和 owner scope 不可互相绕过。
+- P0-01a 首次 bootstrap 在事务中持久化 Project、生成默认 Environment，并创建 `bootstrap-admin` Principal 与 `project.owner` Grant；并发调用收敛到同一 Environment ID，相同配置重启幂等。
+- 已持久化 Project Key、Locale、Time Zone、Currency 或 Environment Key 与启动配置漂移时拒绝启动。
+- Token 只认证 Principal，Actor 自报 Role 不参与授权；Admin 只接受 PostgreSQL 中 active、未撤销且精确匹配 Scope/Principal 的 Owner Grant，授权状态读取失败时 fail closed。
+- 非默认或 disabled Environment、disabled Project/Principal 均被拒绝；Project/Environment/Principal/Grant 表不包含 Token、Secret、Password 或 Credential 列。
+- 撤销 Owner Grant 后，Record、Revision 与 Draft Admin 请求使用同一 Token 立即返回 403；Server 重启不会补回 Grant，受控恢复 Grant 后无需重启即可恢复访问。
 - 非空 sortable 声明和未允许的 Public 读取操作被拒绝。
 - Store 保持 Project/Module/Resource/Revision 边界、唯一值、引用完整性、乐观并发和软删除约束。
 - Server 重装配后仍可读取 PostgreSQL Record。
@@ -109,6 +116,8 @@ OpenAPI breaking check、`govulncheck` 和供应链扫描仍需在 RC 前补齐�
 - Validation 验证 invalid 是 2xx 领域结果、issues 稳定排序、valid Candidate 可复现、并发覆盖不能落下错误代次事实。
 - Plan 验证变化顺序与 Hash 稳定、Validation 绑定、风险分类、重放幂等，以及 Candidate 未登记、OpenAPI/Record/Runtime 不变。
 - Lite 不依赖外部服务可启动；Server 缺少数据库、模块、Project ID 或管理员 Token 时 fail-fast。
+
+以上 P0-01a 用例只证明固定 bootstrap Principal、默认 Environment 与单一 `project.owner` Grant 的最小闭环。当前没有 Account/Credential/Membership 生命周期、动态 Role/Policy、Grant 管理 API、身份 Provider，也没有给 Record、Revision、Draft 数据补齐 `environment_id`；这些缺口不能被现有通过项解释为完整 P0-01 或多 Environment 隔离。
 
 以下能力仍是后续 alpha.3 的测试目标，不是 alpha.3b 已通过项：Publish 事务、Outbox、Activate/Rollback、通用业务 Idempotency Key、副作用、Provider 错误分类、Revision epoch、数据迁移执行和 N-1 Schema 激活升级。alpha.3b 的 Idempotency Key 只覆盖 Create Draft。
 

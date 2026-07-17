@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shezw/panvara/internal/application/access"
 	application "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/application/record"
 	"github.com/shezw/panvara/internal/domain/actor"
@@ -156,10 +157,10 @@ type fakeRevisionRegistryService struct {
 }
 
 func (service *fakeRevisionRegistryService) List(
-	_ context.Context, projectID project.ID, owner actor.Context, _ string, limit int,
+	_ context.Context, execution access.Execution, _ string, limit int,
 ) ([]domain.RevisionSummary, error) {
 	service.limit = limit
-	if !projectID.Valid() || !owner.HasRole("project.owner") {
+	if !execution.Scope().ProjectID().Valid() || execution.Actor().ActorID() != "bootstrap-admin" {
 		return nil, errors.New("missing owner identity")
 	}
 	if service.err != nil {
@@ -169,7 +170,7 @@ func (service *fakeRevisionRegistryService) List(
 }
 
 func (service *fakeRevisionRegistryService) Get(
-	_ context.Context, _ project.ID, _ actor.Context, _, _ string,
+	_ context.Context, _ access.Execution, _, _ string,
 ) (domain.Revision, error) {
 	if service.err != nil {
 		return domain.Revision{}, service.err
@@ -178,7 +179,7 @@ func (service *fakeRevisionRegistryService) Get(
 }
 
 func (service *fakeRevisionRegistryService) GetSource(
-	_ context.Context, _ project.ID, _ actor.Context, _, _ string,
+	_ context.Context, _ access.Execution, _, _ string,
 ) (application.RevisionSource, error) {
 	if service.err != nil {
 		return application.RevisionSource{}, service.err
@@ -205,7 +206,8 @@ func newTestHandlerWithRevisionService(t *testing.T, revisions RevisionRegistryS
 		t.Fatal(err)
 	}
 	handler, err := New(Config{
-		Project: projectContext, PublicActor: publicActor, Module: fakeModule{}, Records: &fakeRecordService{},
+		Project: projectContext, Scope: testProjectScope(t),
+		PublicActor: publicActor, Module: fakeModule{}, Records: &fakeRecordService{},
 		Revisions: revisions, AdminAuth: auth,
 	})
 	if err != nil {

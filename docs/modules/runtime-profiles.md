@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/modules/runtime-profiles.md    2026-07-14
+    docs/modules/runtime-profiles.md    2026-07-18
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -25,7 +25,7 @@ Profile 是部署组合，不是付费等级，也不是互相继承的产品版
 | Profile | 当前状态 | 当前用途 | 依赖 |
 | --- | --- | --- | --- |
 | `lite` | 可运行基础切片 | Core 生命周期、健康和版本验收 | 无 |
-| `server` | 可运行最小纵向切片；Server Core 未完成 | 一个 AppModule 的 HTTP API 与持久化 CRUD | PostgreSQL |
+| `server` | 可运行最小纵向切片；Server Core 未完成 | 一个 AppModule 的 HTTP API、持久化 CRUD 与 P0-01a 最小访问闭环 | PostgreSQL |
 | `manager` | 规划中 | Server + 管理控制面 | 尚不可启动 |
 | `site` | 规划中 | Website 与 Assets | 尚不可启动 |
 | `commerce` | 规划中 | Commerce 与 Payments | 尚不可启动 |
@@ -42,6 +42,7 @@ Server 额外需要：
 - PostgreSQL 18.4，推荐使用仓库 Compose。
 - 一个有效 AppModule YAML/JSON。
 - [Project Context](project-context.md) 配置。
+- [执行作用域与访问内核](project-access.md) 使用的默认 Environment Key；未设置时为 `default`。
 - 至少 32 字节、无空白字符的管理员 Token。
 
 ## 最小示例
@@ -74,7 +75,7 @@ make infra-up
 make run-server
 ```
 
-成功时会输出 Profile、监听地址、模块名称和 Revision。另一个终端调用 Admin API 前也要加载同一份 `.env` 和 `.env.local`。
+首次成功启动会先持久化 Project、生成默认 Environment，并创建 `bootstrap-admin` Principal 与 `project.owner` Grant，然后输出 Profile、监听地址、模块名称和 Revision。后续相同配置重启会复用这些事实；Project/Environment 配置漂移会在监听 HTTP 前拒绝启动。另一个终端调用 Admin API 前也要加载同一份 `.env` 和 `.env.local`。
 
 停止进程使用 `Ctrl+C`，关闭本地数据库容器使用：
 
@@ -100,9 +101,12 @@ Panvara 不会自动读取 `.env`。所有配置可使用环境变量；命令�
 | `PANVARA_PROJECT_LOCALE` | `en-US` | 忽略 | 可选 |
 | `PANVARA_PROJECT_TIME_ZONE` | `UTC` | 忽略 | 可选 |
 | `PANVARA_PROJECT_CURRENCY` | `USD` | 忽略 | 可选 |
+| `PANVARA_ENVIRONMENT_KEY` | `default` | 忽略 | 可选；当前唯一默认 Environment Key |
 | `PANVARA_ADMIN_TOKEN` | 无 | 忽略 | 必需，至少 32 字节 |
 
-对应 CLI Flag 包括 `--profile`、`--http`、`--database-url`、`--module-source`、`--module-format`、`--project-*` 和 `--admin-token`。真实 Token 不应放在命令行，因为同机其他进程可能看到参数。
+对应 CLI Flag 包括 `--profile`、`--http`、`--database-url`、`--module-source`、`--module-format`、`--project-*`、`--environment-key` 和 `--admin-token`。真实 Token 不应放在命令行，因为同机其他进程可能看到参数。
+
+Token 只把请求认证为固定 `bootstrap-admin` Principal。Admin API 是否放行由 Application 层读取持久化 Owner Grant 决定；正确 Token 在 Grant 已撤销时仍会收到 403，重启也不会补回 Grant。
 
 查看版本而不启动服务：
 
@@ -126,8 +130,10 @@ go run ./cmd/panvara --version
 2. 启动日志显示 `profile=server`、`module=...`、`revision=sha256:...`。
 3. `/readyz` 返回 200。
 4. OpenAPI 和 UI Schema 可访问。
-5. 完成 [CRM Leads](crm-leads.md) 的创建与查询。
-6. 重启 Server 后记录仍存在。
+5. 按[执行作用域与访问内核](project-access.md#最小示例)确认 Project、生成的默认 Environment、Principal 与 Owner Grant 已持久化。
+6. 完成 [CRM Leads](crm-leads.md) 的创建与查询。
+7. 重启 Server 后 Environment ID 与记录都保持不变。
+8. 在可丢弃环境按[访问内核验收](project-access.md#验收)撤销 Owner Grant；同一 Token 的 Admin 请求和重启后的请求都应返回 403。
 
 ## 常见问题
 
@@ -143,6 +149,14 @@ Panvara 不自动加载文件。请按示例显式导入 `.env` 和 `.env.local`
 
 先执行 `make local-init`，再在当前 Shell 加载 `.env.local`。仓库中的 `.env.example` 故意把 Token 留空。
 
+### 为什么 Token 正确，Admin API 仍返回 403？
+
+Token 只完成认证。请确认持久化 Project、默认 Environment 与 `bootstrap-admin` Principal 都是 active，并且精确作用域内的 `project.owner` Grant 未撤销。不要通过重启恢复权限；应在受控流程中检查和修复数据库授权事实。
+
+### 为什么修改 Project 或 Environment 配置后无法启动？
+
+某个 Project ID 第一次启动后，数据库是该 Project/Environment 身份与设置的权威来源。Server 会拒绝同一 Project ID 下的 Project Key、Locale、Time Zone、Currency 或 Environment Key 漂移；恢复原配置后再启动。新的 Project ID 与新的唯一 Key 会创建另一 Project，不是修改旧 Project。当前没有通过 `.env` 修改持久化 Project 的流程。
+
 ### 可以运行 `--profile=manager` 看 UI 吗？
 
 不可以。当前版本会提示该 Profile 没有可运行装配并退出。
@@ -155,6 +169,8 @@ Panvara 不自动加载文件。请按示例显式导入 `.env` 和 `.env.local`
 
 - Lite 不是“无数据库业务 Server”，它只提供 Core 运维端点。
 - Server 每次启动只装配一个项目和一个 AppModule。
+- P0-01a 只有固定 bootstrap Principal 与 Owner Grant，不是完整 IAM；没有账号、凭据生命周期、Membership 或动态 Role/Policy。
+- 只有默认 Environment 可以执行现有用例；业务事实表尚无 `environment_id`，没有多 Environment 数据隔离。
 - 没有热重载、后台 Worker、Manager UI 或独立 Provider 进程。
 - 没有多节点配置收敛、服务发现或分布式发布控制面。
 - Compose 仅供本地开发，不适用于生产。
@@ -164,4 +180,4 @@ Panvara 不自动加载文件。请按示例显式导入 `.env` 和 `.env.local`
 
 Profile 名称是配置契约，但 alpha 阶段的内部组合仍可能变化。自动化脚本应检查启动退出码和 `/readyz`，不要只判断进程存在。
 
-从 Lite 切换到 Server 不会自动创建业务模型；必须显式提供数据库、AppModule、Project Context 和 Token。未来 Manager/Site/Commerce/Distributed 真正落地时，应同时增加本页的启动和验收步骤，并保持未实现组合 fail-fast。
+从 Lite 切换到 Server 不会自动创建业务模型；必须显式提供数据库、AppModule、Project Context 和 Token。Migration 0004 后，某个 Project ID 第一次由 Server 装配时会创建最小持久化作用域；同一 Project ID 的后续启动要求其 Project/Environment 配置一致，并尊重已撤销 Grant。未来 Manager/Site/Commerce/Distributed 真正落地时，应同时增加本页的启动和验收步骤，并保持未实现组合 fail-fast。

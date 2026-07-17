@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/development.md    2026-07-14
+    docs/development.md    2026-07-18
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -50,6 +50,7 @@ Panvara 可执行文件嵌入 Go 的 IANA Time Zone Database，避免精简容�
 - Minimal 全部能力。
 - PostgreSQL 18.4。
 - `crm-leads` YAML/JSON 模块文件。
+- P0-01a 最小持久化执行作用域与 Application Access Kernel；这不等于完整 P0-01、IAM 或多 Environment 数据隔离。
 - 通过 `PANVARA_TEST_DATABASE_URL` 使用 PostgreSQL 18.4，或由集成测试启动一次性 Docker 容器；不复用手工 Compose 数据。
 - Mailpit 或 Console Email Adapter 延后到 alpha.3。
 
@@ -73,7 +74,7 @@ Valkey、NATS、MinIO 和 OpenTelemetry Collector 只有在对应 Port/Adapter �
 
 `make verify` 与 `make run` 不需要 Docker，也不会隐式启动 PostgreSQL。
 
-## 4. 启动 alpha.2 Server
+## 4. 启动 Server 开发切片
 
 先检查工具、创建本地配置并显式加载。`make local-init` 不会覆盖已有文件：
 
@@ -86,7 +87,11 @@ Valkey、NATS、MinIO 和 OpenTelemetry Collector 只有在对应 Port/Adapter �
 
     make run-server
 
-不要在示例、配置文件、模块 Source、Git 或 `--admin-token` 参数中保存真实 Token；命令行参数通常对同机进程可见。生产环境应由 Secret Manager 注入。alpha.2 要求 Token 至少 32 字节；`BootstrapAdminAuth` 验证器只保存 SHA-256 摘要，但环境变量与启动配置中的明文生命周期不作清除保证。
+某个 Project ID 第一次由 Server 装配时，会在 migration 后用一个事务持久化 Project、生成默认 Environment，并创建 `bootstrap-admin` Principal 与 `project.owner` Grant。`PANVARA_ENVIRONMENT_KEY` 未设置时默认为 `default`。后续以同一 Project ID 和相同配置重启会复用持久化作用域；该 Project 的 Key、Locale、Time Zone、Currency 或 Environment Key 漂移会拒绝启动。新 Project ID 配合新唯一 Key 会创建另一套隔离事实，不会迁移原项目。
+
+不要在示例、配置文件、模块 Source、Git 或 `--admin-token` 参数中保存真实 Token；命令行参数通常对同机进程可见。生产环境应由 Secret Manager 注入。Server 要求 Token 至少 32 字节；`BootstrapAdminAuth` 在进程内只保存 SHA-256 摘要，Project/Environment/Principal/Grant 表不保存 Token 或摘要，但环境变量与启动配置中的明文生命周期不作清除保证。
+
+Token 只认证固定 Principal，不能单独授予权限。每个 Admin 用例都由 Application 层读取持久化 Owner Grant；撤销 Grant 后同一 Token 会返回 403，重启也不会补回。详细边界与本地验收见[执行作用域与访问内核指南](modules/project-access.md)，架构决策见 [ADR-0004](adr/0004-persistent-execution-scope-access-kernel.md)。
 
 另一个终端验证：
 
@@ -115,9 +120,9 @@ Panvara 不隐式加载 `.env`。需要覆盖默认值时，通过 Shell、IDE �
 | make fmt-check | 检查未格式化文件，不修改工作区 |
 | make test | 随机顺序运行单元和 seed corpus |
 | make test-race | 开启 Race Detector |
-| make test-integration | 强制运行 PostgreSQL 18.4 Store 集成测试；不可跳过 |
-| make test-server-smoke | 强制运行 Server HTTP/持久化 smoke；不可跳过 |
-| make test-e2e | 顺序运行以上两个 alpha.2 必需集成目标 |
+| make test-integration | 强制运行 PostgreSQL 18.4 Store 集成测试，包含 P0-01a bootstrap、漂移、状态与 Grant 约束；不可跳过 |
+| make test-server-smoke | 强制运行 Server HTTP/持久化 smoke，包含撤权即时生效与重启不恢复；不可跳过 |
+| make test-e2e | 顺序运行以上两个当前 Server 必需集成目标；不代表完整 P0-01 已覆盖 |
 | make vet | Go 静态检查 |
 | make build | 生成 bin/panvara |
 | make verify | Docker-free 快速 PR 门禁；不包含集成目标 |
@@ -144,11 +149,12 @@ Panvara 不隐式加载 `.env`。需要覆盖默认值时，通过 Shell、IDE �
 | PANVARA_PROJECT_LOCALE | en-US | BCP 47 Locale |
 | PANVARA_PROJECT_TIME_ZONE | UTC | IANA Time Zone |
 | PANVARA_PROJECT_CURRENCY | USD | ISO 风格 Currency |
+| PANVARA_ENVIRONMENT_KEY | default | 当前 Project 唯一默认 Environment 的可读 Key；该 Project 首次启动后漂移会拒绝启动 |
 | PANVARA_ADMIN_TOKEN | 无 | Server 必需，至少 32 字节；只建议 Secret/环境变量注入 |
 | PANVARA_TEST_DATABASE_URL | 无 | 测试专用 PostgreSQL 18.4 URL；设置后不启动 Docker 容器 |
 | PANVARA_REQUIRE_DOCKER | 无 | `1` 时 Docker/数据库不可用必须失败；Make 集成目标和 CI 已设置 |
 
-alpha.2 的实际配置优先级是：CLI > 环境变量 > 内置默认值，尚无配置文件加载器或 Secret Reference Runtime。普通参数可以使用 CLI；管理员 Token 应避免 CLI，只从 Secret Manager 注入的环境变量读取，不进入模型、仓库、日志或普通环境样例。
+当前实际配置优先级是：CLI > 环境变量 > 内置默认值，尚无配置文件加载器或 Secret Reference Runtime。普通参数可以使用 CLI；管理员 Token 应避免 CLI，只从 Secret Manager 注入的环境变量读取，不进入模型、仓库、日志或普通环境样例。配置优先级只决定启动输入，不允许覆盖已经持久化的 Project/Environment 事实。
 
 ## 7. CI 与依赖策略
 
@@ -156,7 +162,7 @@ alpha.2 的实际配置优先级是：CLI > 环境变量 > 内置默认值，尚
 
 - Node.js 22：模块文档契约检查与 VitePress 静态构建。
 - Go 1.26.5：fmt-check、vet、unit、race、build。
-- PostgreSQL 18.4：独立 required Job 执行 `make test-e2e`；使用 Service URL，并设置 `PANVARA_REQUIRE_DOCKER=1`，测试不得 Skip。
+- PostgreSQL 18.4：独立 required Job 执行 `make test-e2e`；使用 Service URL，并设置 `PANVARA_REQUIRE_DOCKER=1`，测试不得 Skip。当前覆盖 P0-01a 最小访问闭环，但不宣称完整 P0-01 或 IAM。
 - Go 1.25.12：vet、unit、build，且禁止工具链自动升级；不启动 Service、不执行 integration tag。
 
 `make verify` 保持快速且 Docker-free，PostgreSQL 门禁由独立 Job 并行执行。这样个人开发者可以快速迭代，又不会让 PR 绕过真实数据库语义。

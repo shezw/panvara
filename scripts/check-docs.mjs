@@ -40,6 +40,7 @@ const requiredPages = [
   "docs/adr/0001-module-data-revision-identities.md",
   "docs/adr/0002-immutable-revision-registry.md",
   "docs/adr/0003-draft-validation-change-plan.md",
+  "docs/adr/0004-persistent-execution-scope-access-kernel.md",
 ];
 
 const moduleHeadings = [

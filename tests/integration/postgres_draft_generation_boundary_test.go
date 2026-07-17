@@ -24,7 +24,6 @@ import (
 	"time"
 
 	application "github.com/shezw/panvara/internal/application/appmodule"
-	"github.com/shezw/panvara/internal/domain/actor"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
 	panvarapg "github.com/shezw/panvara/internal/infrastructure/postgres"
 )
@@ -38,10 +37,10 @@ func TestPostgresDraftGenerationBigintBoundary(t *testing.T) {
 	}
 
 	projectID := mustProjectID(t, "01981234-5678-7abc-8def-0123456789ab")
-	owner, err := actor.New(projectID.String(), "generation-owner", []string{"project.owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	execution := integrationAdminExecution(
+		t, projectID, integrationEnvironmentA, "generation-owner",
+	)
+	owner := execution.Actor()
 	draftID, err := domain.ParseDraftID("01981234-5678-7abc-8def-0123456789bf")
 	if err != nil {
 		t.Fatal(err)
@@ -75,18 +74,20 @@ func TestPostgresDraftGenerationBigintBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock := integrationDraftClock{at: createdAt.Add(time.Minute)}
-	registry, err := application.NewRevisionRegistry(revisionStore, clock)
+	registry, err := application.NewRevisionRegistry(revisionStore, allowAuthorizer{}, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := application.NewDraftWorkflow(draftStore, registry, clock, &integrationDraftIDGenerator{})
+	workflow, err := application.NewDraftWorkflow(
+		draftStore, registry, allowAuthorizer{}, clock, &integrationDraftIDGenerator{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	maximumSource := []byte("draft: at-bigint-boundary\n")
 	maximum, changed, err := workflow.Replace(
-		ctx, projectID, owner, "notes", draftID.String(), domain.MaxDraftGeneration-1,
+		ctx, execution, "notes", draftID.String(), domain.MaxDraftGeneration-1,
 		application.ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: maximumSource},
 	)
 	if err != nil || !changed || maximum.Generation() != domain.MaxDraftGeneration {
@@ -114,7 +115,7 @@ func TestPostgresDraftGenerationBigintBoundary(t *testing.T) {
 		t.Fatalf("PostgreSQL Replace(max changed) error = %v, want ErrDraftConflict", err)
 	}
 	if _, _, err := workflow.Replace(
-		ctx, projectID, owner, "notes", draftID.String(), domain.MaxDraftGeneration,
+		ctx, execution, "notes", draftID.String(), domain.MaxDraftGeneration,
 		application.ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: overflowing.Source()},
 	); !errors.Is(err, application.ErrDraftConflict) {
 		t.Fatalf("Workflow Replace(max changed) error = %v, want ErrDraftConflict", err)

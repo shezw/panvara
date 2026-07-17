@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shezw/panvara/internal/application/access"
 	"github.com/shezw/panvara/internal/application/record"
 	domainmodule "github.com/shezw/panvara/internal/domain/appmodule"
 )
@@ -50,7 +51,7 @@ func (handler *Handler) handlePublicCollection(writer http.ResponseWriter, reque
 	if !handler.validateRoute(writer, request, record.SurfacePublic, domainmodule.OperationCreate) {
 		return
 	}
-	handler.createRecord(writer, request, record.SurfacePublic)
+	handler.createRecord(writer, request)
 }
 
 func (handler *Handler) handleAdminCollection(writer http.ResponseWriter, request *http.Request) {
@@ -59,7 +60,7 @@ func (handler *Handler) handleAdminCollection(writer http.ResponseWriter, reques
 		if !handler.validateRoute(writer, request, record.SurfaceAdmin, domainmodule.OperationCreate) {
 			return
 		}
-		handler.createRecord(writer, request, record.SurfaceAdmin)
+		handler.createRecord(writer, request)
 	case http.MethodGet:
 		if !handler.validateRoute(writer, request, record.SurfaceAdmin, domainmodule.OperationList) {
 			return
@@ -114,7 +115,7 @@ func (handler *Handler) validateRoute(
 	return true
 }
 
-func (handler *Handler) createRecord(writer http.ResponseWriter, request *http.Request, surface record.Surface) {
+func (handler *Handler) createRecord(writer http.ResponseWriter, request *http.Request) {
 	body, problem := readJSONBody(writer, request)
 	if problem != nil {
 		writeProblem(writer, request, problem)
@@ -125,7 +126,11 @@ func (handler *Handler) createRecord(writer http.ResponseWriter, request *http.R
 		handler.writeApplicationError(writer, request, err)
 		return
 	}
-	created, err := handler.records.Create(request.Context(), scope, surface, body)
+	execution, ok := requestExecution(writer, request)
+	if !ok {
+		return
+	}
+	created, err := handler.records.Create(request.Context(), execution, scope, body)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
 		return
@@ -139,7 +144,11 @@ func (handler *Handler) getRecord(writer http.ResponseWriter, request *http.Requ
 	if !ok {
 		return
 	}
-	result, err := handler.records.Get(request.Context(), scope, id)
+	execution, ok := requestExecution(writer, request)
+	if !ok {
+		return
+	}
+	result, err := handler.records.Get(request.Context(), execution, scope, id)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
 		return
@@ -158,7 +167,11 @@ func (handler *Handler) listRecords(writer http.ResponseWriter, request *http.Re
 		handler.writeApplicationError(writer, request, err)
 		return
 	}
-	result, err := handler.records.List(request.Context(), scope, record.SurfaceAdmin, options)
+	execution, ok := requestExecution(writer, request)
+	if !ok {
+		return
+	}
+	result, err := handler.records.List(request.Context(), execution, scope, options)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
 		return
@@ -188,8 +201,12 @@ func (handler *Handler) patchRecord(writer http.ResponseWriter, request *http.Re
 	if !ok {
 		return
 	}
+	execution, ok := requestExecution(writer, request)
+	if !ok {
+		return
+	}
 	updated, err := handler.records.Update(
-		request.Context(), scope, id, expectedVersion, record.SurfaceAdmin, body,
+		request.Context(), execution, scope, id, expectedVersion, body,
 	)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
@@ -208,13 +225,29 @@ func (handler *Handler) deleteRecord(writer http.ResponseWriter, request *http.R
 	if !ok {
 		return
 	}
-	deleted, err := handler.records.Delete(request.Context(), scope, id, expectedVersion)
+	execution, ok := requestExecution(writer, request)
+	if !ok {
+		return
+	}
+	deleted, err := handler.records.Delete(request.Context(), execution, scope, id, expectedVersion)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
 		return
 	}
 	writer.Header().Set("ETag", formatVersionETag(deleted.Version))
 	writer.WriteHeader(http.StatusNoContent)
+}
+
+func requestExecution(
+	writer http.ResponseWriter,
+	request *http.Request,
+) (access.Execution, bool) {
+	execution, ok := ExecutionFromContext(request.Context())
+	if !ok {
+		writeError(writer, request, http.StatusInternalServerError, "internal_error", "internal server error", nil)
+		return access.Execution{}, false
+	}
+	return execution, true
 }
 
 func (handler *Handler) scopeAndID(

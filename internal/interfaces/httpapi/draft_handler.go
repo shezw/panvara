@@ -19,11 +19,10 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/shezw/panvara/internal/application/access"
 	application "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/application/record"
-	"github.com/shezw/panvara/internal/domain/actor"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
-	"github.com/shezw/panvara/internal/domain/project"
 )
 
 const (
@@ -38,14 +37,14 @@ const (
 
 // DraftWorkflowService is the project-owner application boundary consumed by HTTP.
 type DraftWorkflowService interface {
-	Create(context.Context, project.ID, actor.Context, string, application.CreateDraftInput) (domain.Draft, bool, error)
-	Get(context.Context, project.ID, actor.Context, string, string) (domain.Draft, error)
-	GetSource(context.Context, project.ID, actor.Context, string, string) (application.DraftSource, error)
-	Replace(context.Context, project.ID, actor.Context, string, string, uint64, application.ReplaceDraftInput) (domain.Draft, bool, error)
-	Validate(context.Context, project.ID, actor.Context, string, string, uint64) (application.DraftValidation, bool, error)
-	GetValidation(context.Context, project.ID, actor.Context, string, string, string) (application.DraftValidation, error)
-	Plan(context.Context, project.ID, actor.Context, string, string, string, uint64) (application.DraftPlan, bool, error)
-	GetPlan(context.Context, project.ID, actor.Context, string, string, string) (application.DraftPlan, error)
+	Create(context.Context, access.Execution, string, application.CreateDraftInput) (domain.Draft, bool, error)
+	Get(context.Context, access.Execution, string, string) (domain.Draft, error)
+	GetSource(context.Context, access.Execution, string, string) (application.DraftSource, error)
+	Replace(context.Context, access.Execution, string, string, uint64, application.ReplaceDraftInput) (domain.Draft, bool, error)
+	Validate(context.Context, access.Execution, string, string, uint64) (application.DraftValidation, bool, error)
+	GetValidation(context.Context, access.Execution, string, string, string) (application.DraftValidation, error)
+	Plan(context.Context, access.Execution, string, string, string, uint64) (application.DraftPlan, bool, error)
+	GetPlan(context.Context, access.Execution, string, string, string) (application.DraftPlan, error)
 }
 
 func (handler *Handler) registerDraftRoutes(mux *http.ServeMux, auth *BootstrapAdminAuth) {
@@ -80,11 +79,11 @@ func (handler *Handler) handleDraftCollection(writer http.ResponseWriter, reques
 		writeProblem(writer, request, problem)
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
-	value, created, err := handler.drafts.Create(request.Context(), projectID, owner, request.PathValue("module"), application.CreateDraftInput{
+	value, created, err := handler.drafts.Create(request.Context(), execution, request.PathValue("module"), application.CreateDraftInput{
 		BaselineRevision: baseline, Format: format, Source: source, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
@@ -100,12 +99,12 @@ func (handler *Handler) handleDraftItem(writer http.ResponseWriter, request *htt
 	if !requireMethod(writer, request, http.MethodGet) {
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
 	value, err := handler.drafts.Get(
-		request.Context(), projectID, owner, request.PathValue("module"), request.PathValue("draft"),
+		request.Context(), execution, request.PathValue("module"), request.PathValue("draft"),
 	)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
@@ -118,12 +117,12 @@ func (handler *Handler) handleDraftSource(writer http.ResponseWriter, request *h
 	if !requireMethod(writer, request, http.MethodGet, http.MethodPut) {
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
 	if request.Method == http.MethodGet {
-		handler.getDraftSource(writer, request, projectID, owner)
+		handler.getDraftSource(writer, request, execution)
 		return
 	}
 	expected, problem := parseDraftIfMatch(request)
@@ -137,7 +136,7 @@ func (handler *Handler) handleDraftSource(writer http.ResponseWriter, request *h
 		return
 	}
 	value, _, err := handler.drafts.Replace(
-		request.Context(), projectID, owner, request.PathValue("module"), request.PathValue("draft"), expected,
+		request.Context(), execution, request.PathValue("module"), request.PathValue("draft"), expected,
 		application.ReplaceDraftInput{Format: format, Source: source},
 	)
 	if err != nil {
@@ -150,11 +149,10 @@ func (handler *Handler) handleDraftSource(writer http.ResponseWriter, request *h
 func (handler *Handler) getDraftSource(
 	writer http.ResponseWriter,
 	request *http.Request,
-	projectID project.ID,
-	owner actor.Context,
+	execution access.Execution,
 ) {
 	value, err := handler.drafts.GetSource(
-		request.Context(), projectID, owner, request.PathValue("module"), request.PathValue("draft"),
+		request.Context(), execution, request.PathValue("module"), request.PathValue("draft"),
 	)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
@@ -190,12 +188,12 @@ func (handler *Handler) handleDraftValidationCollection(writer http.ResponseWrit
 		writeProblem(writer, request, problem)
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
 	value, created, err := handler.drafts.Validate(
-		request.Context(), projectID, owner, request.PathValue("module"), request.PathValue("draft"), expected,
+		request.Context(), execution, request.PathValue("module"), request.PathValue("draft"), expected,
 	)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
@@ -210,12 +208,12 @@ func (handler *Handler) handleDraftValidationItem(writer http.ResponseWriter, re
 	if !requireMethod(writer, request, http.MethodGet) {
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
 	value, err := handler.drafts.GetValidation(
-		request.Context(), projectID, owner, request.PathValue("module"), request.PathValue("draft"),
+		request.Context(), execution, request.PathValue("module"), request.PathValue("draft"),
 		request.PathValue("validation"),
 	)
 	if err != nil {
@@ -244,12 +242,12 @@ func (handler *Handler) handleDraftPlanCollection(writer http.ResponseWriter, re
 		writeProblem(writer, request, problem)
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
 	value, created, err := handler.drafts.Plan(
-		request.Context(), projectID, owner, request.PathValue("module"), request.PathValue("draft"),
+		request.Context(), execution, request.PathValue("module"), request.PathValue("draft"),
 		input.ValidationID, expected,
 	)
 	if err != nil {
@@ -265,12 +263,12 @@ func (handler *Handler) handleDraftPlanItem(writer http.ResponseWriter, request 
 	if !requireMethod(writer, request, http.MethodGet) {
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
 	value, err := handler.drafts.GetPlan(
-		request.Context(), projectID, owner, request.PathValue("module"), request.PathValue("draft"), request.PathValue("plan"),
+		request.Context(), execution, request.PathValue("module"), request.PathValue("draft"), request.PathValue("plan"),
 	)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)

@@ -104,6 +104,7 @@ func executeWithFactories(
 	projectLocale := flags.String("project-locale", envOr(getenv, "PANVARA_PROJECT_LOCALE", "en-US"), "single-project BCP 47 locale")
 	projectZone := flags.String("project-time-zone", envOr(getenv, "PANVARA_PROJECT_TIME_ZONE", "UTC"), "single-project IANA time zone")
 	projectMoney := flags.String("project-currency", envOr(getenv, "PANVARA_PROJECT_CURRENCY", "USD"), "single-project ISO currency")
+	environmentKey := flags.String("environment-key", envOr(getenv, "PANVARA_ENVIRONMENT_KEY", "default"), "single-project default environment key")
 	adminToken := flags.String("admin-token", envOr(getenv, "PANVARA_ADMIN_TOKEN", ""), "bootstrap administrator token (prefer PANVARA_ADMIN_TOKEN; CLI arguments are process-visible)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -146,7 +147,8 @@ func executeWithFactories(
 		application, err = buildApplication(ctx, serverConfig{
 			databaseURL: *databaseURL, moduleSource: *moduleSource, moduleFormat: *moduleFormat,
 			projectID: *projectID, projectKey: *projectKey, projectLocale: *projectLocale,
-			projectZone: *projectZone, projectMoney: *projectMoney, adminToken: *adminToken,
+			projectZone: *projectZone, projectMoney: *projectMoney,
+			environmentKey: *environmentKey, adminToken: *adminToken,
 		})
 		if err != nil {
 			return fmt.Errorf("assemble server profile: %w", err)

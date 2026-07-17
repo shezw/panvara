@@ -26,7 +26,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	application "github.com/shezw/panvara/internal/application/appmodule"
-	"github.com/shezw/panvara/internal/domain/actor"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
 	panvarapg "github.com/shezw/panvara/internal/infrastructure/postgres"
 	spec "github.com/shezw/panvara/internal/spec/appmodule/v1alpha1"
@@ -42,20 +41,18 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 
 	projectID := mustProjectID(t, "01981234-5678-7abc-8def-0123456789ab")
 	otherProject := mustProjectID(t, "01981234-5678-7abc-8def-0123456789ac")
-	owner, err := actor.New(projectID.String(), "integration-owner", []string{"project.owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	otherOwner, err := actor.New(otherProject.String(), "integration-owner-b", []string{"project.owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	execution := integrationAdminExecution(
+		t, projectID, integrationEnvironmentA, "integration-owner",
+	)
+	otherExecution := integrationAdminExecution(
+		t, otherProject, integrationEnvironmentB, "integration-owner-b",
+	)
 	clock := integrationDraftClock{at: time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC)}
 	revisionStore, err := panvarapg.NewRevisionStore(pool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := application.NewRevisionRegistry(revisionStore, clock)
+	registry, err := application.NewRevisionRegistry(revisionStore, allowAuthorizer{}, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,26 +69,28 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := application.NewDraftWorkflow(draftStore, registry, clock, &integrationDraftIDGenerator{})
+	workflow, err := application.NewDraftWorkflow(
+		draftStore, registry, allowAuthorizer{}, clock, &integrationDraftIDGenerator{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	draft, created, err := workflow.Create(ctx, projectID, owner, "notes", application.CreateDraftInput{
+	draft, created, err := workflow.Create(ctx, execution, "notes", application.CreateDraftInput{
 		BaselineRevision: baseline.RevisionHash(), Format: domain.SourceFormatYAML,
 		Source: baselineSource, IdempotencyKey: "integration-create",
 	})
 	if err != nil || !created {
 		t.Fatalf("Create() = %#v, %v, %v", draft, created, err)
 	}
-	replayed, created, err := workflow.Create(ctx, projectID, owner, "notes", application.CreateDraftInput{
+	replayed, created, err := workflow.Create(ctx, execution, "notes", application.CreateDraftInput{
 		BaselineRevision: baseline.RevisionHash(), Format: domain.SourceFormatYAML,
 		Source: baselineSource, IdempotencyKey: "integration-create",
 	})
 	if err != nil || created || replayed.ID() != draft.ID() {
 		t.Fatalf("Create(replay) = %#v, %v, %v", replayed, created, err)
 	}
-	if _, _, err := workflow.Create(ctx, projectID, owner, "notes", application.CreateDraftInput{
+	if _, _, err := workflow.Create(ctx, execution, "notes", application.CreateDraftInput{
 		BaselineRevision: baseline.RevisionHash(), Format: domain.SourceFormatYAML,
 		Source: []byte("different"), IdempotencyKey: "integration-create",
 	}); !errors.Is(err, application.ErrDraftIdempotencyConflict) {
@@ -101,7 +100,7 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM panvara_module_draft WHERE project_id = $1`, projectID.String()).Scan(&draftCountBeforeNUL); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := workflow.Create(ctx, projectID, owner, "notes", application.CreateDraftInput{
+	if _, _, err := workflow.Create(ctx, execution, "notes", application.CreateDraftInput{
 		BaselineRevision: "none", Format: domain.SourceFormatYAML,
 		Source: []byte("bad\x00source"), IdempotencyKey: "integration-raw-nul",
 	}); !errors.Is(err, application.ErrDraftInvalid) {
@@ -114,23 +113,23 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 	if draftCountAfterNUL != draftCountBeforeNUL {
 		t.Fatalf("raw NUL changed persisted Draft count: %d -> %d", draftCountBeforeNUL, draftCountAfterNUL)
 	}
-	noOp, changed, err := workflow.Replace(ctx, projectID, owner, "notes", draft.ID().String(), 1,
+	noOp, changed, err := workflow.Replace(ctx, execution, "notes", draft.ID().String(), 1,
 		application.ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: baselineSource})
 	if err != nil || changed || noOp.Generation() != 1 || noOp.UpdatedAt() != draft.UpdatedAt() {
 		t.Fatalf("Replace(no-op) = %#v, %v, %v", noOp, changed, err)
 	}
-	validation, created, err := workflow.Validate(ctx, projectID, owner, "notes", draft.ID().String(), 1)
+	validation, created, err := workflow.Validate(ctx, execution, "notes", draft.ID().String(), 1)
 	if err != nil || !created || !validation.Valid {
 		t.Fatalf("Validate() = %#v, %v, %v", validation, created, err)
 	}
-	if _, created, err := workflow.Validate(ctx, projectID, owner, "notes", draft.ID().String(), 1); err != nil || created {
+	if _, created, err := workflow.Validate(ctx, execution, "notes", draft.ID().String(), 1); err != nil || created {
 		t.Fatalf("Validate(replay) created = %v error = %v", created, err)
 	}
-	plan, created, err := workflow.Plan(ctx, projectID, owner, "notes", draft.ID().String(), validation.ID, 1)
+	plan, created, err := workflow.Plan(ctx, execution, "notes", draft.ID().String(), validation.ID, 1)
 	if err != nil || !created || len(plan.Changes) != 0 || plan.Risk != "none" {
 		t.Fatalf("Plan() = %#v, %v, %v", plan, created, err)
 	}
-	if _, created, err := workflow.Plan(ctx, projectID, owner, "notes", draft.ID().String(), validation.ID, 1); err != nil || created {
+	if _, created, err := workflow.Plan(ctx, execution, "notes", draft.ID().String(), validation.ID, 1); err != nil || created {
 		t.Fatalf("Plan(replay) created = %v error = %v", created, err)
 	}
 
@@ -138,47 +137,51 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	restartedWorkflow, err := application.NewDraftWorkflow(restartedStore, registry, clock, &integrationDraftIDGenerator{})
+	restartedWorkflow, err := application.NewDraftWorkflow(
+		restartedStore, registry, allowAuthorizer{}, clock, &integrationDraftIDGenerator{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := restartedWorkflow.GetValidation(ctx, projectID, owner, "notes", draft.ID().String(), validation.ID); err != nil || got.ID != validation.ID {
+	if got, err := restartedWorkflow.GetValidation(ctx, execution, "notes", draft.ID().String(), validation.ID); err != nil || got.ID != validation.ID {
 		t.Fatalf("restart GetValidation() = %#v, %v", got, err)
 	}
-	if got, err := restartedWorkflow.GetPlan(ctx, projectID, owner, "notes", draft.ID().String(), plan.ID); err != nil || got.ID != plan.ID {
+	if got, err := restartedWorkflow.GetPlan(ctx, execution, "notes", draft.ID().String(), plan.ID); err != nil || got.ID != plan.ID {
 		t.Fatalf("restart GetPlan() = %#v, %v", got, err)
 	}
 	if _, err := restartedStore.Get(ctx, otherProject, "notes", draft.ID()); !errors.Is(err, application.ErrDraftNotFound) {
 		t.Fatalf("cross-project Get() error = %v", err)
 	}
-	otherWorkflow, err := application.NewDraftWorkflow(restartedStore, registry, clock, &integrationDraftIDGenerator{})
+	otherWorkflow, err := application.NewDraftWorkflow(
+		restartedStore, registry, allowAuthorizer{}, clock, &integrationDraftIDGenerator{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := otherWorkflow.GetValidation(ctx, otherProject, otherOwner, "notes", draft.ID().String(), validation.ID); !errors.Is(err, application.ErrValidationNotFound) {
+	if _, err := otherWorkflow.GetValidation(ctx, otherExecution, "notes", draft.ID().String(), validation.ID); !errors.Is(err, application.ErrValidationNotFound) {
 		t.Fatalf("cross-project GetValidation() error = %v", err)
 	}
-	if _, err := otherWorkflow.GetPlan(ctx, otherProject, otherOwner, "notes", draft.ID().String(), plan.ID); !errors.Is(err, application.ErrPlanNotFound) {
+	if _, err := otherWorkflow.GetPlan(ctx, otherExecution, "notes", draft.ID().String(), plan.ID); !errors.Is(err, application.ErrPlanNotFound) {
 		t.Fatalf("cross-project GetPlan() error = %v", err)
 	}
-	if _, _, err := otherWorkflow.Replace(ctx, otherProject, otherOwner, "notes", draft.ID().String(), 1,
+	if _, _, err := otherWorkflow.Replace(ctx, otherExecution, "notes", draft.ID().String(), 1,
 		application.ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: baselineSource}); !errors.Is(err, application.ErrDraftNotFound) {
 		t.Fatalf("cross-project Replace() error = %v", err)
 	}
-	if _, _, err := otherWorkflow.Create(ctx, otherProject, otherOwner, "notes", application.CreateDraftInput{
+	if _, _, err := otherWorkflow.Create(ctx, otherExecution, "notes", application.CreateDraftInput{
 		BaselineRevision: baseline.RevisionHash(), Format: domain.SourceFormatYAML,
 		Source: baselineSource, IdempotencyKey: "integration-cross-baseline",
 	}); !errors.Is(err, application.ErrRevisionNotFound) {
 		t.Fatalf("cross-project baseline Create() error = %v", err)
 	}
-	otherDraft, otherCreated, err := otherWorkflow.Create(ctx, otherProject, otherOwner, "notes", application.CreateDraftInput{
+	otherDraft, otherCreated, err := otherWorkflow.Create(ctx, otherExecution, "notes", application.CreateDraftInput{
 		BaselineRevision: "none", Format: domain.SourceFormatYAML,
 		Source: baselineSource, IdempotencyKey: "integration-create",
 	})
 	if err != nil || !otherCreated || otherDraft.ID() != draft.ID() {
 		t.Fatalf("same identity in other project Create() = %#v, %v, %v; first ID=%s", otherDraft, otherCreated, err, draft.ID())
 	}
-	if replay, created, err := otherWorkflow.Create(ctx, otherProject, otherOwner, "notes", application.CreateDraftInput{
+	if replay, created, err := otherWorkflow.Create(ctx, otherExecution, "notes", application.CreateDraftInput{
 		BaselineRevision: "none", Format: domain.SourceFormatYAML,
 		Source: baselineSource, IdempotencyKey: "integration-create",
 	}); err != nil || created || replay.ID() != otherDraft.ID() {
@@ -195,7 +198,7 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 		go func() {
 			defer group.Done()
 			<-start
-			_, changed, err := workflow.Replace(ctx, projectID, owner, "notes", draft.ID().String(), 1,
+			_, changed, err := workflow.Replace(ctx, execution, "notes", draft.ID().String(), 1,
 				application.ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: equivalentSource})
 			if err == nil && !changed {
 				err = errors.New("concurrent winning replacement was a no-op")
@@ -220,7 +223,7 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 	if successes != 1 || conflicts != writers-1 {
 		t.Fatalf("concurrent Replace() = %d successes, %d conflicts", successes, conflicts)
 	}
-	current, err := workflow.Get(ctx, projectID, owner, "notes", draft.ID().String())
+	current, err := workflow.Get(ctx, execution, "notes", draft.ID().String())
 	if err != nil || current.Generation() != 2 {
 		t.Fatalf("Get(after CAS) = %#v, %v", current, err)
 	}
@@ -232,7 +235,7 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 		go func() {
 			defer group.Done()
 			<-noOpStart
-			value, changed, err := workflow.Replace(ctx, projectID, owner, "notes", draft.ID().String(), 2,
+			value, changed, err := workflow.Replace(ctx, execution, "notes", draft.ID().String(), 2,
 				application.ReplaceDraftInput{Format: domain.SourceFormatYAML, Source: equivalentSource})
 			if err == nil && (changed || value.Generation() != 2) {
 				err = errors.New("concurrent identical replacement changed generation")
@@ -261,7 +264,7 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 		go func() {
 			defer group.Done()
 			<-validationStart
-			value, created, err := workflow.Validate(ctx, projectID, owner, "notes", draft.ID().String(), 2)
+			value, created, err := workflow.Validate(ctx, execution, "notes", draft.ID().String(), 2)
 			validationResults <- validationResult{value: value, created: created, err: err}
 		}()
 	}
@@ -300,7 +303,7 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 			defer group.Done()
 			<-planStart
 			value, created, err := workflow.Plan(
-				ctx, projectID, owner, "notes", draft.ID().String(), equivalentValidation.ID, 2,
+				ctx, execution, "notes", draft.ID().String(), equivalentValidation.ID, 2,
 			)
 			planResults <- planResult{value: value, created: created, err: err}
 		}()
@@ -326,7 +329,7 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 	if planCreated != 1 || equivalentPlan.ID == plan.ID || equivalentPlan.PlanHash != plan.PlanHash {
 		t.Fatalf("concurrent Plan created=%d value=%#v first=%#v", planCreated, equivalentPlan, plan)
 	}
-	if _, _, err := workflow.Plan(ctx, projectID, owner, "notes", draft.ID().String(), validation.ID, 1); !errors.Is(err, application.ErrDraftConflict) {
+	if _, _, err := workflow.Plan(ctx, execution, "notes", draft.ID().String(), validation.ID, 1); !errors.Is(err, application.ErrDraftConflict) {
 		t.Fatalf("Plan(stale validation) error = %v", err)
 	}
 

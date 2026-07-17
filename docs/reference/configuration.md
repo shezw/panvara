@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/reference/configuration.md    2026-07-15
+    docs/reference/configuration.md    2026-07-18
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -43,7 +43,19 @@ set -a; . ./.env; . ./.env.local; set +a
 | `PANVARA_PROJECT_LOCALE` | `en-US` |  | 否 | BCP 47 语言与地区 |
 | `PANVARA_PROJECT_TIME_ZONE` | `UTC` |  | 否 | IANA 时区，例如 `Asia/Shanghai` |
 | `PANVARA_PROJECT_CURRENCY` | `USD` |  | 否 | 项目默认币种，例如 `CNY`、`EUR` |
-| `PANVARA_ADMIN_TOKEN` | 至少 32 字节 | ✓ | ✓ | 临时管理员 Bearer Token，只通过可信环境注入 |
+| `PANVARA_ENVIRONMENT_KEY` | `default` |  | 否 | 当前唯一默认 Environment 的可读 Key |
+| `PANVARA_ADMIN_TOKEN` | 至少 32 字节 | ✓ | ✓ | 将 Bearer 请求认证为 `bootstrap-admin`；Admin 授权仍读取持久化 Grant |
+
+## Project、Environment 与访问 bootstrap
+
+P0-01a 开发切片在 migration 之后、HTTP 就绪之前建立最小持久化执行作用域：
+
+- 某个 `PANVARA_PROJECT_ID` 第一次由 Server 装配时，按 `PANVARA_PROJECT_*` 持久化 Project，生成 UUIDv7 默认 Environment，并创建 `bootstrap-admin` Principal 与精确作用域内的 `project.owner` Grant。
+- `PANVARA_ENVIRONMENT_KEY` 未设置时默认为 `default`。Environment ID 由 Server 生成，不通过配置指定。
+- 后续以同一 Project ID 和相同配置重启会复用持久化身份；该 Project 的 Key、Locale、Time Zone、Currency 或 Environment Key 与数据库不一致时拒绝启动，不会静默更新。新的 Project ID 与新的全局唯一 Key 会创建另一套 Project 事实，而不是修改或迁移旧数据。
+- Admin Token 只认证 Principal。Application 层每次从 PostgreSQL 读取 active、未撤销的 Owner Grant 决定授权；撤销 Grant 后，即使 Token 不变、Server 重启，也不会自动恢复权限。
+
+这只是 P0-01a 可运行切片，不是完整 P0-01 或 IAM。当前没有 Account/Credential/Membership、动态 Role/Policy、Grant 管理 API，也没有多 Environment 业务数据隔离；Record、Revision 与 Draft 表仍无 `environment_id`。使用与验收见[执行作用域与访问内核指南](../modules/project-access.md)，架构约束见 [ADR-0004](../adr/0004-persistent-execution-scope-access-kernel.md)。
 
 ## 本地 Compose 变量
 
@@ -58,9 +70,9 @@ Panvara 使用的 PostgreSQL 18.4 数据库必须采用 UTF8 `server_encoding`�
 
 ## Revision Registry
 
-alpha.3a Registry 开发切片不增加配置项。Server 在 migration 之后、对外就绪之前，使用当前 `PANVARA_PROJECT_ID`、`PANVARA_MODULE_SOURCE` 和 `PANVARA_MODULE_FORMAT` 进行幂等 bootstrap 登记；失败会阻止启动。
+alpha.3a Registry 开发切片不增加配置项。Server 在 migration 与 P0-01a 作用域初始化之后、对外就绪之前，使用当前持久化 Project、`PANVARA_MODULE_SOURCE` 和 `PANVARA_MODULE_FORMAT` 进行幂等 bootstrap 登记；失败会阻止启动。
 
-`PANVARA_ADMIN_TOKEN` 保护 Registry 读取接口，以及 alpha.3b Draft、Validation 与 Plan 的 owner 控制面接口。当前没有 active Revision、Publish、Activate 或 Rollback 配置，也不能用 Registry List 顺序配置运行版本。
+`PANVARA_ADMIN_TOKEN` 负责认证 Registry 读取接口，以及 alpha.3b Draft、Validation 与 Plan 控制面接口的 `bootstrap-admin` Principal；这些 Admin 用例仍由持久化 Owner Grant 授权。当前没有 active Revision、Publish、Activate 或 Rollback 配置，也不能用 Registry List 顺序配置运行版本。
 
 `data_schema_identities` 也不是配置项。它是 Panvara 为不可变父 Revision 计算并按 format 升序返回的派生身份数组；新增算法只能追加新的 format，用户不能通过环境变量覆盖 fingerprint。
 
@@ -81,4 +93,6 @@ alpha.3b 不增加环境变量。Draft Baseline 必须由每个 Create 请求显
 - `.env` 和 `.env.local` 不提交 Git。
 - 生产环境不要复用示例数据库密码或本地管理员 Token。
 - CLI 参数通常能被同机进程观察，管理员 Token 不使用 `--admin-token`。
+- Project/Environment/Principal/Grant 表不保存 Admin Token 或 Token 摘要；Token 仍应只通过可信环境注入，不能因为数据库未保存它就降低保护等级。
+- 不把 Token 通过等同于已经授权；持久化 Grant 被撤销或作用域停用时，正确 Token 的 Admin 请求仍应返回 403。
 - 生产凭据最终应由 Secret Manager 通过受控引用注入；alpha.2 尚未实现 Secret Reference Runtime。

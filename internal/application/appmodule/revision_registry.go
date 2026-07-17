@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shezw/panvara/internal/domain/actor"
+	"github.com/shezw/panvara/internal/application/access"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
 	"github.com/shezw/panvara/internal/domain/project"
 	spec "github.com/shezw/panvara/internal/spec/appmodule/v1alpha1"
@@ -40,8 +40,8 @@ const (
 var (
 	// ErrRevisionInvalid reports malformed registry input.
 	ErrRevisionInvalid = errors.New("invalid module revision request")
-	// ErrRevisionForbidden reports a failed application-layer owner check.
-	ErrRevisionForbidden = errors.New("module revision access forbidden")
+	// ErrRevisionForbidden aliases the shared access denial for compatibility.
+	ErrRevisionForbidden = access.ErrForbidden
 	// ErrRevisionNotFound reports an absent project/module/revision fact.
 	ErrRevisionNotFound = errors.New("module revision not found")
 	// ErrRevisionCorrupt reports persisted bytes that fail identity verification.
@@ -77,24 +77,36 @@ type RevisionSource struct {
 // RevisionRegistry coordinates bootstrap registration and authorized, verified
 // read access without owning publication or activation state.
 type RevisionRegistry struct {
-	store    RevisionStore
-	clock    RevisionClock
-	compiler *Compiler
+	store      RevisionStore
+	authorizer access.Authorizer
+	clock      RevisionClock
+	compiler   *Compiler
 }
 
 // NewRevisionRegistry constructs the immutable revision use-case boundary.
-func NewRevisionRegistry(store RevisionStore, clock RevisionClock) (*RevisionRegistry, error) {
+func NewRevisionRegistry(
+	store RevisionStore,
+	authorizer access.Authorizer,
+	clock RevisionClock,
+) (*RevisionRegistry, error) {
 	if store == nil {
 		return nil, fmt.Errorf("%w: nil revision store", ErrRevisionInvalid)
+	}
+	if authorizer == nil {
+		return nil, fmt.Errorf("%w: nil revision authorizer", ErrRevisionInvalid)
 	}
 	if clock == nil {
 		return nil, fmt.Errorf("%w: nil revision clock", ErrRevisionInvalid)
 	}
-	return &RevisionRegistry{store: store, clock: clock, compiler: NewCompiler()}, nil
+	return &RevisionRegistry{
+		store: store, authorizer: authorizer, clock: clock, compiler: NewCompiler(),
+	}, nil
 }
 
 // RegisterBootstrap registers the currently compiled Server source as an
 // immutable bootstrap fact. Equivalent sources never replace the first source.
+// This composition-root-only system path intentionally bypasses user
+// authorization and must never be exposed through an interface adapter.
 func (registry *RevisionRegistry) RegisterBootstrap(
 	ctx context.Context,
 	projectID project.ID,
@@ -102,7 +114,7 @@ func (registry *RevisionRegistry) RegisterBootstrap(
 	source []byte,
 	format spec.Format,
 ) (domain.Revision, bool, error) {
-	if registry == nil || registry.store == nil || registry.compiler == nil {
+	if registry == nil || registry.store == nil || registry.clock == nil || registry.compiler == nil {
 		return domain.Revision{}, false, fmt.Errorf("%w: uninitialized revision registry", ErrRevisionInvalid)
 	}
 	if err := ctx.Err(); err != nil {
@@ -157,14 +169,14 @@ func (registry *RevisionRegistry) RegisterBootstrap(
 // It intentionally does not load or recompile large stored artifacts.
 func (registry *RevisionRegistry) List(
 	ctx context.Context,
-	projectID project.ID,
-	owner actor.Context,
+	execution access.Execution,
 	module string,
 	limit int,
 ) ([]domain.RevisionSummary, error) {
-	if err := authorizeRevisionRead(projectID, owner); err != nil {
+	if err := registry.authorize(ctx, execution, access.OperationRevisionList); err != nil {
 		return nil, err
 	}
+	projectID := execution.Scope().ProjectID()
 	module = strings.TrimSpace(module)
 	if !domain.ValidModuleName(module) {
 		return nil, fmt.Errorf("%w: module identity is invalid", ErrRevisionInvalid)
@@ -192,28 +204,28 @@ func (registry *RevisionRegistry) List(
 // Get returns one verified immutable revision after application-layer owner authorization.
 func (registry *RevisionRegistry) Get(
 	ctx context.Context,
-	projectID project.ID,
-	owner actor.Context,
+	execution access.Execution,
 	module string,
 	revisionHash string,
 ) (domain.Revision, error) {
-	if err := authorizeRevisionRead(projectID, owner); err != nil {
+	if err := registry.authorize(ctx, execution, access.OperationRevisionGet); err != nil {
 		return domain.Revision{}, err
 	}
+	projectID := execution.Scope().ProjectID()
 	return registry.getVerified(ctx, projectID, strings.TrimSpace(module), strings.TrimSpace(revisionHash))
 }
 
 // GetSource returns the first registered source only after full stored artifact verification.
 func (registry *RevisionRegistry) GetSource(
 	ctx context.Context,
-	projectID project.ID,
-	owner actor.Context,
+	execution access.Execution,
 	module string,
 	revisionHash string,
 ) (RevisionSource, error) {
-	if err := authorizeRevisionRead(projectID, owner); err != nil {
+	if err := registry.authorize(ctx, execution, access.OperationRevisionGetSource); err != nil {
 		return RevisionSource{}, err
 	}
+	projectID := execution.Scope().ProjectID()
 	value, err := registry.getVerified(ctx, projectID, strings.TrimSpace(module), strings.TrimSpace(revisionHash))
 	if err != nil {
 		return RevisionSource{}, err
@@ -297,15 +309,18 @@ func findSummaryDataSchemaIdentity(values []domain.DataSchemaIdentity, format in
 	return domain.DataSchemaIdentity{}, false
 }
 
-func authorizeRevisionRead(projectID project.ID, owner actor.Context) error {
-	if !projectID.Valid() {
-		return fmt.Errorf("%w: invalid project", ErrRevisionInvalid)
+func (registry *RevisionRegistry) authorize(
+	ctx context.Context,
+	execution access.Execution,
+	operation access.Operation,
+) error {
+	if registry == nil || registry.authorizer == nil {
+		return fmt.Errorf("%w: uninitialized revision registry", ErrRevisionInvalid)
 	}
-	if !owner.Valid() || owner.Anonymous() || owner.ProjectID().String() != projectID.String() ||
-		!owner.HasRole("project.owner") {
-		return ErrRevisionForbidden
+	if err := execution.Validate(); err != nil {
+		return err
 	}
-	return nil
+	return registry.authorizer.Authorize(ctx, execution, operation)
 }
 
 func sameCompiledModule(left, right *CompiledModule) bool {

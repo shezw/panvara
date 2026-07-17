@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/shezw/panvara/internal/application/access"
 	appmodule "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/application/record"
 	"github.com/shezw/panvara/internal/domain/actor"
@@ -47,11 +48,11 @@ type Module interface {
 
 // RecordService is the model-driven CRUD use-case boundary consumed by HTTP.
 type RecordService interface {
-	Create(context.Context, record.Scope, record.Surface, json.RawMessage) (record.Record, error)
-	Get(context.Context, record.Scope, record.ID) (record.Record, error)
-	List(context.Context, record.Scope, record.Surface, record.ListOptions) (record.ListResult, error)
-	Update(context.Context, record.Scope, record.ID, uint64, record.Surface, json.RawMessage) (record.Record, error)
-	Delete(context.Context, record.Scope, record.ID, uint64) (record.Record, error)
+	Create(context.Context, access.Execution, record.Scope, json.RawMessage) (record.Record, error)
+	Get(context.Context, access.Execution, record.Scope, record.ID) (record.Record, error)
+	List(context.Context, access.Execution, record.Scope, record.ListOptions) (record.ListResult, error)
+	Update(context.Context, access.Execution, record.Scope, record.ID, uint64, json.RawMessage) (record.Record, error)
+	Delete(context.Context, access.Execution, record.Scope, record.ID, uint64) (record.Record, error)
 }
 
 // Config contains the complete single-project composition for one API router.
@@ -59,6 +60,7 @@ type RecordService interface {
 // access and one bootstrap project owner.
 type Config struct {
 	Project     project.Context
+	Scope       project.Scope
 	PublicActor actor.Context
 	Module      Module
 	Records     RecordService
@@ -69,15 +71,16 @@ type Config struct {
 
 // Handler exposes generated schema and record APIs for one compiled module.
 type Handler struct {
-	project     project.Context
-	publicActor actor.Context
-	adminActor  actor.Context
-	module      Module
-	records     RecordService
-	revisions   RevisionRegistryService
-	drafts      DraftWorkflowService
-	resources   map[string]resourcePolicy
-	router      http.Handler
+	project        project.Context
+	executionScope project.Scope
+	publicActor    actor.Context
+	adminActor     actor.Context
+	module         Module
+	records        RecordService
+	revisions      RevisionRegistryService
+	drafts         DraftWorkflowService
+	resources      map[string]resourcePolicy
+	router         http.Handler
 }
 
 type resourcePolicy struct {
@@ -93,6 +96,10 @@ func New(config Config) (*Handler, error) {
 	if err := validateActors(config); err != nil {
 		return nil, err
 	}
+	if err := config.Scope.Validate(); err != nil ||
+		config.Scope.ProjectID().String() != config.Project.ID().String() {
+		return nil, fmt.Errorf("http API project/environment scope is invalid")
+	}
 	if config.Module == nil {
 		return nil, fmt.Errorf("http API module is nil")
 	}
@@ -104,7 +111,8 @@ func New(config Config) (*Handler, error) {
 	}
 
 	handler := &Handler{
-		project: config.Project, publicActor: config.PublicActor, adminActor: config.AdminAuth.actor,
+		project: config.Project, executionScope: config.Scope,
+		publicActor: config.PublicActor, adminActor: config.AdminAuth.actor,
 		module: config.Module, records: config.Records, revisions: config.Revisions, drafts: config.Drafts,
 		resources: makeResourcePolicies(config.Module.Descriptor()),
 	}
@@ -153,9 +161,6 @@ func validateActors(config Config) error {
 	}
 	if adminActor.ProjectID().String() != projectID {
 		return fmt.Errorf("http API administrator actor belongs to another project")
-	}
-	if !adminActor.HasRole("project.owner") {
-		return fmt.Errorf("http API administrator actor lacks project.owner role")
 	}
 	return nil
 }

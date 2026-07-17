@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shezw/panvara/internal/application/access"
 	"github.com/shezw/panvara/internal/domain/actor"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
 	"github.com/shezw/panvara/internal/domain/project"
@@ -54,54 +55,56 @@ func TestRevisionRegistryBootstrapIsIdempotentAndRetainsFirstSource(t *testing.T
 
 func TestRevisionRegistryQueriesEnforceApplicationOwnerBoundary(t *testing.T) {
 	t.Parallel()
+	projectID := revisionTestProject(t, "01981234-5678-7abc-8def-0123456789ab")
+	execution := appmoduleTestExecution(t, projectID, "owner", []string{"project.owner"})
+	store := newFakeRevisionStore()
+	denied := &recordingAuthorizer{err: access.ErrForbidden}
+	registry := mustRevisionRegistryWithAuthorizer(t, store, denied)
+	unknown := "sha256:" + strings.Repeat("f", 64)
+
+	if _, err := registry.List(context.Background(), execution, "notes", 20); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("List() error = %v, want access.ErrForbidden", err)
+	}
+	if _, err := registry.Get(context.Background(), execution, "notes", unknown); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("Get() error = %v, want access.ErrForbidden", err)
+	}
+	if _, err := registry.GetSource(context.Background(), execution, "notes", unknown); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("GetSource() error = %v, want access.ErrForbidden", err)
+	}
+	wantOperations := []access.Operation{
+		access.OperationRevisionList,
+		access.OperationRevisionGet,
+		access.OperationRevisionGetSource,
+	}
+	if got := denied.Operations(); !equalOperations(got, wantOperations) {
+		t.Fatalf("authorization operations = %#v, want %#v", got, wantOperations)
+	}
+	if calls := store.Calls(); calls != 0 {
+		t.Fatalf("denied revision store calls = %d, want 0", calls)
+	}
+}
+
+func TestRevisionRegistryQueriesReturnAuthorizedRevision(t *testing.T) {
+	t.Parallel()
 	store := newFakeRevisionStore()
 	registry := mustRevisionRegistry(t, store)
 	projectID := revisionTestProject(t, "01981234-5678-7abc-8def-0123456789ab")
-	otherProject := revisionTestProject(t, "01981234-5678-7abc-8def-0123456789ac")
-	owner := revisionTestActor(t, projectID, "owner", []string{"project.owner"})
+	execution := appmoduleTestExecution(t, projectID, "owner", nil)
 	source := revisionTestYAML("notes", "1.0.0", "")
 	module := mustCompileRevisionSource(t, source)
 	revision, _, err := registry.RegisterBootstrap(context.Background(), projectID, module, source, spec.FormatYAML)
 	if err != nil {
 		t.Fatal(err)
 	}
-	anonymous, err := actor.NewAnonymous(projectID.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	tests := []struct {
-		name  string
-		actor actor.Context
-	}{
-		{name: "zero", actor: actor.Context{}},
-		{name: "anonymous", actor: anonymous},
-		{name: "non-owner", actor: revisionTestActor(t, projectID, "member", []string{"project.member"})},
-		{name: "other project", actor: revisionTestActor(t, otherProject, "owner", []string{"project.owner"})},
-	}
-	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			if _, err := registry.List(context.Background(), projectID, test.actor, "notes", 20); !errors.Is(err, ErrRevisionForbidden) {
-				t.Fatalf("List() error = %v, want ErrRevisionForbidden", err)
-			}
-			if _, err := registry.Get(context.Background(), projectID, test.actor, "notes", revision.RevisionHash()); !errors.Is(err, ErrRevisionForbidden) {
-				t.Fatalf("Get() error = %v, want ErrRevisionForbidden", err)
-			}
-			if _, err := registry.GetSource(context.Background(), projectID, test.actor, "notes", revision.RevisionHash()); !errors.Is(err, ErrRevisionForbidden) {
-				t.Fatalf("GetSource() error = %v, want ErrRevisionForbidden", err)
-			}
-		})
-	}
-	values, err := registry.List(context.Background(), projectID, owner, "notes", 20)
+	values, err := registry.List(context.Background(), execution, "notes", 20)
 	if err != nil || len(values) != 1 || values[0].RevisionHash() != revision.RevisionHash() {
 		t.Fatalf("authorized List() = %#v, %v", values, err)
 	}
-	got, err := registry.Get(context.Background(), projectID, owner, "notes", revision.RevisionHash())
+	got, err := registry.Get(context.Background(), execution, "notes", revision.RevisionHash())
 	if err != nil || got.RevisionHash() != revision.RevisionHash() {
 		t.Fatalf("authorized Get() = %#v, %v", got, err)
 	}
-	gotSource, err := registry.GetSource(context.Background(), projectID, owner, "notes", revision.RevisionHash())
+	gotSource, err := registry.GetSource(context.Background(), execution, "notes", revision.RevisionHash())
 	if err != nil || gotSource.Format != domain.SourceFormatYAML || !bytes.Equal(gotSource.Bytes, source) {
 		t.Fatalf("authorized GetSource() = %#v, %v", gotSource, err)
 	}
@@ -112,7 +115,7 @@ func TestRevisionRegistryFailsClosedWhenStoredSourceDoesNotReproduceArtifacts(t 
 	store := newFakeRevisionStore()
 	registry := mustRevisionRegistry(t, store)
 	projectID := revisionTestProject(t, "01981234-5678-7abc-8def-0123456789ab")
-	owner := revisionTestActor(t, projectID, "owner", []string{"project.owner"})
+	execution := appmoduleTestExecution(t, projectID, "owner", nil)
 	source := revisionTestYAML("notes", "1.0.0", "")
 	module := mustCompileRevisionSource(t, source)
 	corrupt, err := domain.NewRevision(domain.RevisionMaterial{
@@ -129,10 +132,10 @@ func TestRevisionRegistryFailsClosedWhenStoredSourceDoesNotReproduceArtifacts(t 
 		t.Fatal(err)
 	}
 	store.values[revisionStoreKey(projectID, module.Name(), module.RevisionHash())] = corrupt
-	if _, err := registry.Get(context.Background(), projectID, owner, module.Name(), module.RevisionHash()); !errors.Is(err, ErrRevisionCorrupt) {
+	if _, err := registry.Get(context.Background(), execution, module.Name(), module.RevisionHash()); !errors.Is(err, ErrRevisionCorrupt) {
 		t.Fatalf("Get(corrupt) error = %v, want ErrRevisionCorrupt", err)
 	}
-	values, err := registry.List(context.Background(), projectID, owner, module.Name(), 20)
+	values, err := registry.List(context.Background(), execution, module.Name(), 20)
 	if err != nil || len(values) != 1 {
 		t.Fatalf("List(corrupt artifacts) = %#v, %v; metadata-only List must not recompile", values, err)
 	}
@@ -143,21 +146,33 @@ func TestRevisionRegistryValidUnknownIdentityReturnsNotFound(t *testing.T) {
 	store := newFakeRevisionStore()
 	registry := mustRevisionRegistry(t, store)
 	projectID := revisionTestProject(t, "01981234-5678-7abc-8def-0123456789ab")
-	owner := revisionTestActor(t, projectID, "owner", []string{"project.owner"})
+	execution := appmoduleTestExecution(t, projectID, "owner", nil)
 	unknown := "sha256:" + strings.Repeat("f", 64)
-	if _, err := registry.Get(context.Background(), projectID, owner, "notes", unknown); !errors.Is(err, ErrRevisionNotFound) {
+	if _, err := registry.Get(context.Background(), execution, "notes", unknown); !errors.Is(err, ErrRevisionNotFound) {
 		t.Fatalf("Get(valid unknown) error = %v, want ErrRevisionNotFound", err)
 	}
-	if _, err := registry.GetSource(context.Background(), projectID, owner, "notes", unknown); !errors.Is(err, ErrRevisionNotFound) {
+	if _, err := registry.GetSource(context.Background(), execution, "notes", unknown); !errors.Is(err, ErrRevisionNotFound) {
 		t.Fatalf("GetSource(valid unknown) error = %v, want ErrRevisionNotFound", err)
 	}
 	for _, identity := range []struct{ module, revision string }{
 		{module: "Bad_Module", revision: unknown},
 		{module: "notes", revision: "not-a-hash"},
 	} {
-		if _, err := registry.Get(context.Background(), projectID, owner, identity.module, identity.revision); !errors.Is(err, ErrRevisionInvalid) {
+		if _, err := registry.Get(context.Background(), execution, identity.module, identity.revision); !errors.Is(err, ErrRevisionInvalid) {
 			t.Fatalf("Get(invalid %q/%q) error = %v, want ErrRevisionInvalid", identity.module, identity.revision, err)
 		}
+	}
+}
+
+func TestNewRevisionRegistryRequiresAuthorizer(t *testing.T) {
+	t.Parallel()
+	_, err := NewRevisionRegistry(
+		newFakeRevisionStore(),
+		nil,
+		fixedRevisionClock{at: time.Date(2026, 7, 15, 1, 0, 0, 0, time.UTC)},
+	)
+	if !errors.Is(err, ErrRevisionInvalid) {
+		t.Fatalf("NewRevisionRegistry(nil authorizer) error = %v, want ErrRevisionInvalid", err)
 	}
 }
 
@@ -168,6 +183,7 @@ func (clock fixedRevisionClock) Now() time.Time { return clock.at }
 type fakeRevisionStore struct {
 	mu     sync.Mutex
 	values map[string]domain.Revision
+	calls  int
 }
 
 func newFakeRevisionStore() *fakeRevisionStore {
@@ -177,6 +193,7 @@ func newFakeRevisionStore() *fakeRevisionStore {
 func (store *fakeRevisionStore) Register(_ context.Context, value domain.Revision) (domain.Revision, bool, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.calls++
 	key := revisionStoreKey(value.ProjectID(), value.ModuleName(), value.RevisionHash())
 	if current, found := store.values[key]; found {
 		return current, false, nil
@@ -188,6 +205,7 @@ func (store *fakeRevisionStore) Register(_ context.Context, value domain.Revisio
 func (store *fakeRevisionStore) List(_ context.Context, projectID project.ID, module string, limit int) ([]domain.RevisionSummary, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.calls++
 	values := make([]domain.RevisionSummary, 0)
 	for _, value := range store.values {
 		if value.ProjectID().String() == projectID.String() && value.ModuleName() == module {
@@ -218,6 +236,7 @@ func revisionTestDataSchemaIdentities(t *testing.T, module *CompiledModule) []do
 func (store *fakeRevisionStore) Get(_ context.Context, projectID project.ID, module, revision string) (domain.Revision, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.calls++
 	value, found := store.values[revisionStoreKey(projectID, module, revision)]
 	if !found {
 		return domain.Revision{}, ErrRevisionNotFound
@@ -225,13 +244,67 @@ func (store *fakeRevisionStore) Get(_ context.Context, projectID project.ID, mod
 	return value, nil
 }
 
+func (store *fakeRevisionStore) Calls() int {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.calls
+}
+
 func mustRevisionRegistry(t *testing.T, store RevisionStore) *RevisionRegistry {
 	t.Helper()
-	registry, err := NewRevisionRegistry(store, fixedRevisionClock{at: time.Date(2026, 7, 15, 1, 0, 0, 0, time.UTC)})
+	return mustRevisionRegistryWithAuthorizer(t, store, &recordingAuthorizer{})
+}
+
+func mustRevisionRegistryWithAuthorizer(
+	t *testing.T,
+	store RevisionStore,
+	authorizer access.Authorizer,
+) *RevisionRegistry {
+	t.Helper()
+	registry, err := NewRevisionRegistry(
+		store,
+		authorizer,
+		fixedRevisionClock{at: time.Date(2026, 7, 15, 1, 0, 0, 0, time.UTC)},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return registry
+}
+
+type recordingAuthorizer struct {
+	mu         sync.Mutex
+	err        error
+	operations []access.Operation
+}
+
+func (authorizer *recordingAuthorizer) Authorize(
+	_ context.Context,
+	_ access.Execution,
+	operation access.Operation,
+) error {
+	authorizer.mu.Lock()
+	defer authorizer.mu.Unlock()
+	authorizer.operations = append(authorizer.operations, operation)
+	return authorizer.err
+}
+
+func (authorizer *recordingAuthorizer) Operations() []access.Operation {
+	authorizer.mu.Lock()
+	defer authorizer.mu.Unlock()
+	return append([]access.Operation(nil), authorizer.operations...)
+}
+
+func equalOperations(left, right []access.Operation) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func revisionTestProject(t *testing.T, value string) project.ID {
@@ -250,6 +323,32 @@ func revisionTestActor(t *testing.T, projectID project.ID, id string, roles []st
 		t.Fatal(err)
 	}
 	return value
+}
+
+func appmoduleTestExecution(
+	t *testing.T,
+	projectID project.ID,
+	actorID string,
+	roles []string,
+) access.Execution {
+	t.Helper()
+	environmentID, err := project.ParseEnvironmentID("01981234-5678-7abc-8def-0123456789fe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := project.NewScope(projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := access.NewExecution(
+		scope,
+		revisionTestActor(t, projectID, actorID, roles),
+		access.SurfaceAdmin,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return execution
 }
 
 func revisionStoreKey(projectID project.ID, module, revision string) string {

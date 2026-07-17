@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shezw/panvara/internal/application/access"
 	application "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/domain/actor"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
@@ -261,7 +262,8 @@ func newTestHandlerWithDrafts(t *testing.T, drafts DraftWorkflowService) *Handle
 		t.Fatal(err)
 	}
 	handler, err := New(Config{
-		Project: projectContext, PublicActor: publicActor, Module: fakeModule{}, Records: &fakeRecordService{},
+		Project: projectContext, Scope: testProjectScope(t),
+		PublicActor: publicActor, Module: fakeModule{}, Records: &fakeRecordService{},
 		Drafts: drafts, AdminAuth: auth,
 	})
 	if err != nil {
@@ -374,60 +376,60 @@ type fakeDraftWorkflowService struct {
 	getPlan       func(context.Context, project.ID, actor.Context, string, string, string) (application.DraftPlan, error)
 }
 
-func (service *fakeDraftWorkflowService) Create(ctx context.Context, projectID project.ID, owner actor.Context, module string, input application.CreateDraftInput) (domain.Draft, bool, error) {
+func (service *fakeDraftWorkflowService) Create(ctx context.Context, execution access.Execution, module string, input application.CreateDraftInput) (domain.Draft, bool, error) {
 	if service.create == nil {
 		return domain.Draft{}, false, errors.New("unexpected draft Create")
 	}
-	return service.create(ctx, projectID, owner, module, input)
+	return service.create(ctx, execution.Scope().ProjectID(), execution.Actor(), module, input)
 }
 
-func (service *fakeDraftWorkflowService) Get(ctx context.Context, projectID project.ID, owner actor.Context, module, id string) (domain.Draft, error) {
+func (service *fakeDraftWorkflowService) Get(ctx context.Context, execution access.Execution, module, id string) (domain.Draft, error) {
 	if service.get == nil {
 		return domain.Draft{}, errors.New("unexpected draft Get")
 	}
-	return service.get(ctx, projectID, owner, module, id)
+	return service.get(ctx, execution.Scope().ProjectID(), execution.Actor(), module, id)
 }
 
-func (service *fakeDraftWorkflowService) GetSource(ctx context.Context, projectID project.ID, owner actor.Context, module, id string) (application.DraftSource, error) {
+func (service *fakeDraftWorkflowService) GetSource(ctx context.Context, execution access.Execution, module, id string) (application.DraftSource, error) {
 	if service.getSource == nil {
 		return application.DraftSource{}, errors.New("unexpected draft GetSource")
 	}
-	return service.getSource(ctx, projectID, owner, module, id)
+	return service.getSource(ctx, execution.Scope().ProjectID(), execution.Actor(), module, id)
 }
 
-func (service *fakeDraftWorkflowService) Replace(ctx context.Context, projectID project.ID, owner actor.Context, module, id string, generation uint64, input application.ReplaceDraftInput) (domain.Draft, bool, error) {
+func (service *fakeDraftWorkflowService) Replace(ctx context.Context, execution access.Execution, module, id string, generation uint64, input application.ReplaceDraftInput) (domain.Draft, bool, error) {
 	if service.replace == nil {
 		return domain.Draft{}, false, errors.New("unexpected draft Replace")
 	}
-	return service.replace(ctx, projectID, owner, module, id, generation, input)
+	return service.replace(ctx, execution.Scope().ProjectID(), execution.Actor(), module, id, generation, input)
 }
 
-func (service *fakeDraftWorkflowService) Validate(ctx context.Context, projectID project.ID, owner actor.Context, module, id string, generation uint64) (application.DraftValidation, bool, error) {
+func (service *fakeDraftWorkflowService) Validate(ctx context.Context, execution access.Execution, module, id string, generation uint64) (application.DraftValidation, bool, error) {
 	if service.validate == nil {
 		return application.DraftValidation{}, false, errors.New("unexpected draft Validate")
 	}
-	return service.validate(ctx, projectID, owner, module, id, generation)
+	return service.validate(ctx, execution.Scope().ProjectID(), execution.Actor(), module, id, generation)
 }
 
-func (service *fakeDraftWorkflowService) GetValidation(ctx context.Context, projectID project.ID, owner actor.Context, module, id, validationID string) (application.DraftValidation, error) {
+func (service *fakeDraftWorkflowService) GetValidation(ctx context.Context, execution access.Execution, module, id, validationID string) (application.DraftValidation, error) {
 	if service.getValidation == nil {
 		return application.DraftValidation{}, errors.New("unexpected draft GetValidation")
 	}
-	return service.getValidation(ctx, projectID, owner, module, id, validationID)
+	return service.getValidation(ctx, execution.Scope().ProjectID(), execution.Actor(), module, id, validationID)
 }
 
-func (service *fakeDraftWorkflowService) Plan(ctx context.Context, projectID project.ID, owner actor.Context, module, id, validationID string, generation uint64) (application.DraftPlan, bool, error) {
+func (service *fakeDraftWorkflowService) Plan(ctx context.Context, execution access.Execution, module, id, validationID string, generation uint64) (application.DraftPlan, bool, error) {
 	if service.plan == nil {
 		return application.DraftPlan{}, false, errors.New("unexpected draft Plan")
 	}
-	return service.plan(ctx, projectID, owner, module, id, validationID, generation)
+	return service.plan(ctx, execution.Scope().ProjectID(), execution.Actor(), module, id, validationID, generation)
 }
 
-func (service *fakeDraftWorkflowService) GetPlan(ctx context.Context, projectID project.ID, owner actor.Context, module, id, planID string) (application.DraftPlan, error) {
+func (service *fakeDraftWorkflowService) GetPlan(ctx context.Context, execution access.Execution, module, id, planID string) (application.DraftPlan, error) {
 	if service.getPlan == nil {
 		return application.DraftPlan{}, errors.New("unexpected draft GetPlan")
 	}
-	return service.getPlan(ctx, projectID, owner, module, id, planID)
+	return service.getPlan(ctx, execution.Scope().ProjectID(), execution.Actor(), module, id, planID)
 }
 
 var _ DraftWorkflowService = (*fakeDraftWorkflowService)(nil)

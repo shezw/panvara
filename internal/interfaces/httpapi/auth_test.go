@@ -96,3 +96,16 @@ func TestBootstrapAdminAuthRejectsWeakOrAmbiguousToken(t *testing.T) {
 		}
 	}
 }
+
+func TestBootstrapAdminAuthDoesNotTreatActorRolesAsAuthority(t *testing.T) {
+	t.Parallel()
+	adminActor, err := actor.New(
+		"018f7e93-7b2c-7abc-8def-1234567890ab", "bootstrap-admin", nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewBootstrapAdminAuth(testAdminToken, adminActor); err != nil {
+		t.Fatalf("NewBootstrapAdminAuth(actor without self-reported role) error = %v", err)
+	}
+}

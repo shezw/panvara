@@ -117,7 +117,8 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		databaseURL: databaseURL, moduleSource: "testdata/crm-leads.yaml", moduleFormat: "yaml",
 		projectID: "01981234-5678-7abc-8def-0123456789ab", projectKey: "crm",
 		projectLocale: "en-US", projectZone: "UTC", projectMoney: "USD",
-		adminToken: testIntegrationAdminToken,
+		environmentKey: "default",
+		adminToken:     testIntegrationAdminToken,
 	}
 
 	application, server, baseURL := startIntegrationServer(t, ctx, config)
@@ -422,7 +423,40 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		t.Fatalf("PATCH ETag = %q", patchResponse.Header.Get("ETag"))
 	}
 
+	setBootstrapOwnerGrantRevoked(t, ctx, databaseURL, config.projectID, true)
+	assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+	)
+	assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/admin/core/v1alpha1/modules/crm.leads/revisions?limit=100",
+		testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+	)
+	assertIntegrationStatus(
+		t, client, http.MethodGet, baseURL+draftItemPath,
+		testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+	)
 	stopIntegrationServer(t, server, application)
+	application, server, baseURL = startIntegrationServer(t, ctx, config)
+	itemPath = baseURL + "/api/admin/v1alpha1/crm.leads/lead/" + lead.ID
+	assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+	)
+	assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/admin/core/v1alpha1/modules/crm.leads/revisions?limit=100",
+		testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+	)
+	assertIntegrationStatus(
+		t, client, http.MethodGet, baseURL+draftItemPath,
+		testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+	)
+	setBootstrapOwnerGrantRevoked(t, ctx, databaseURL, config.projectID, false)
+	assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	stopIntegrationServer(t, server, application)
+
 	var restarted integrationResponse
 	for restart := 1; restart <= 3; restart++ {
 		application, server, baseURL = startIntegrationServer(t, ctx, config)
@@ -578,6 +612,44 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "registry is corrupt") {
 		t.Fatalf("buildServerApplication(corrupt Registry) error = %v", err)
+	}
+}
+
+func setBootstrapOwnerGrantRevoked(
+	t *testing.T,
+	ctx context.Context,
+	databaseURL string,
+	projectID string,
+	revoked bool,
+) {
+	t.Helper()
+	pool, err := panvarapg.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open PostgreSQL to change bootstrap owner grant: %v", err)
+	}
+	defer pool.Close()
+	var command string
+	if revoked {
+		command = `
+			UPDATE panvara_access_grant
+			SET revoked_at = clock_timestamp()
+			WHERE project_id = $1 AND principal_id = 'bootstrap-admin'
+			  AND role = 'project.owner' AND revoked_at IS NULL
+		`
+	} else {
+		command = `
+			UPDATE panvara_access_grant
+			SET revoked_at = NULL
+			WHERE project_id = $1 AND principal_id = 'bootstrap-admin'
+			  AND role = 'project.owner' AND revoked_at IS NOT NULL
+		`
+	}
+	result, err := pool.Exec(ctx, command, projectID)
+	if err != nil {
+		t.Fatalf("change bootstrap owner grant revoked=%t: %v", revoked, err)
+	}
+	if result.RowsAffected() != 1 {
+		t.Fatalf("change bootstrap owner grant revoked=%t affected %d rows, want 1", revoked, result.RowsAffected())
 	}
 }
 

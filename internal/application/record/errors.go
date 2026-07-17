@@ -29,4 +29,7 @@ var (
 	ErrUniqueConflict = errors.New("record unique value conflict")
 	// ErrReferenced reports an attempted deletion of a referenced record.
 	ErrReferenced = errors.New("record is referenced")
+	// ErrOperationForbidden reports that the selected AppModule surface does not
+	// declare the requested record operation.
+	ErrOperationForbidden = errors.New("record operation is forbidden")
 )

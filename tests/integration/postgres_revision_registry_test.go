@@ -30,7 +30,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	application "github.com/shezw/panvara/internal/application/appmodule"
-	"github.com/shezw/panvara/internal/domain/actor"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
 	panvarapg "github.com/shezw/panvara/internal/infrastructure/postgres"
 	spec "github.com/shezw/panvara/internal/spec/appmodule/v1alpha1"
@@ -52,16 +51,20 @@ func TestPostgresRevisionRegistryIsImmutableAndFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	registeredAt := time.Date(2026, 7, 15, 4, 0, 0, 0, time.UTC)
-	registry, err := application.NewRevisionRegistry(store, integrationRevisionClock{at: registeredAt})
+	registry, err := application.NewRevisionRegistry(
+		store, allowAuthorizer{}, integrationRevisionClock{at: registeredAt},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	projectID := mustProjectID(t, "01981234-5678-7abc-8def-0123456789ab")
 	otherProject := mustProjectID(t, "01981234-5678-7abc-8def-0123456789b0")
-	owner, err := actor.New(projectID.String(), "integration-owner", []string{"project.owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	execution := integrationAdminExecution(
+		t, projectID, integrationEnvironmentA, "integration-owner",
+	)
+	otherExecution := integrationAdminExecution(
+		t, otherProject, integrationEnvironmentB, "other-owner",
+	)
 	firstSource := revisionRegistrySource("")
 	firstModule, err := application.NewCompiler().Compile(firstSource, spec.FormatYAML)
 	if err != nil {
@@ -85,7 +88,9 @@ func TestPostgresRevisionRegistryIsImmutableAndFailsClosed(t *testing.T) {
 		t.Fatal("idempotent registration replaced first provenance")
 	}
 
-	otherRegistry, err := application.NewRevisionRegistry(store, integrationRevisionClock{at: registeredAt.Add(time.Hour)})
+	otherRegistry, err := application.NewRevisionRegistry(
+		store, allowAuthorizer{}, integrationRevisionClock{at: registeredAt.Add(time.Hour)},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,20 +167,16 @@ func TestPostgresRevisionRegistryIsImmutableAndFailsClosed(t *testing.T) {
 	if rolledBackFormatCount != 0 {
 		t.Fatalf("rolled-back format 3 row count = %d, want 0", rolledBackFormatCount)
 	}
-	verified, err := registry.Get(ctx, projectID, owner, "crm.leads", first.RevisionHash())
+	verified, err := registry.Get(ctx, execution, "crm.leads", first.RevisionHash())
 	if err != nil || len(verified.DataSchemaIdentities()) != 2 {
 		t.Fatalf("Get(format 1 with unknown format 2) = %#v, %v", verified.DataSchemaIdentities(), err)
 	}
-	values, err := registry.List(ctx, projectID, owner, "crm.leads", 100)
+	values, err := registry.List(ctx, execution, "crm.leads", 100)
 	if err != nil || len(values) != 1 || len(values[0].DataSchemaIdentities()) != 2 ||
 		values[0].DataSchemaIdentities()[0].Format() != 1 || values[0].DataSchemaIdentities()[1].Format() != 2 {
 		t.Fatalf("List() = %d revisions, %v", len(values), err)
 	}
-	otherOwner, err := actor.New(otherProject.String(), "other-owner", []string{"project.owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	otherValues, err := registry.List(ctx, otherProject, otherOwner, "crm.leads", 100)
+	otherValues, err := registry.List(ctx, otherExecution, "crm.leads", 100)
 	if err != nil || len(otherValues) != 1 || otherValues[0].RevisionHash() != first.RevisionHash() {
 		t.Fatalf("other project List() = %#v, %v", otherValues, err)
 	}
@@ -184,13 +185,13 @@ func TestPostgresRevisionRegistryIsImmutableAndFailsClosed(t *testing.T) {
 		t.Fatalf("other project Get() = %#v, %v", got, err)
 	}
 	unknown := "sha256:" + strings.Repeat("a", 64)
-	if _, err := registry.Get(ctx, projectID, owner, "crm.leads", unknown); !errors.Is(err, application.ErrRevisionNotFound) {
+	if _, err := registry.Get(ctx, execution, "crm.leads", unknown); !errors.Is(err, application.ErrRevisionNotFound) {
 		t.Fatalf("Get(valid unknown) error = %v, want ErrRevisionNotFound", err)
 	}
 
 	concurrentProject := mustProjectID(t, "01981234-5678-7abc-8def-0123456789b1")
 	concurrentRegistry, err := application.NewRevisionRegistry(
-		store, integrationRevisionClock{at: registeredAt.Add(4 * time.Hour)},
+		store, allowAuthorizer{}, integrationRevisionClock{at: registeredAt.Add(4 * time.Hour)},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -294,11 +295,11 @@ func TestPostgresRevisionRegistryIsImmutableAndFailsClosed(t *testing.T) {
 	if _, err := pool.Exec(ctx, `ALTER TABLE panvara_module_revision ENABLE TRIGGER panvara_module_revision_immutable_rows`); err != nil {
 		t.Fatal(err)
 	}
-	metadata, err := registry.List(ctx, projectID, owner, "crm.leads", 100)
+	metadata, err := registry.List(ctx, execution, "crm.leads", 100)
 	if err != nil || len(metadata) != 1 {
 		t.Fatalf("metadata-only List(corrupt parent artifact) = %#v, %v", metadata, err)
 	}
-	if _, err := registry.Get(ctx, projectID, owner, "crm.leads", first.RevisionHash()); !errors.Is(err, application.ErrRevisionCorrupt) {
+	if _, err := registry.Get(ctx, execution, "crm.leads", first.RevisionHash()); !errors.Is(err, application.ErrRevisionCorrupt) {
 		t.Fatalf("Get(corrupt) error = %v, want ErrRevisionCorrupt", err)
 	}
 }

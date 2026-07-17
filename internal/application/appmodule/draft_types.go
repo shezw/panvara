@@ -19,7 +19,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/shezw/panvara/internal/domain/actor"
+	"github.com/shezw/panvara/internal/application/access"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
 	"github.com/shezw/panvara/internal/domain/project"
 )
@@ -40,8 +40,8 @@ const (
 var (
 	// ErrDraftInvalid reports malformed draft input or a corrupt application result.
 	ErrDraftInvalid = errors.New("invalid module draft request")
-	// ErrDraftForbidden reports a failed project-owner authorization check.
-	ErrDraftForbidden = errors.New("module draft access forbidden")
+	// ErrDraftForbidden aliases the shared access denial for compatibility.
+	ErrDraftForbidden = access.ErrForbidden
 	// ErrDraftNotFound reports an absent project/module/draft identity.
 	ErrDraftNotFound = errors.New("module draft not found")
 	// ErrDraftConflict reports an optimistic-concurrency generation mismatch.
@@ -71,7 +71,7 @@ type DraftStore interface {
 
 // DraftRevisionReader returns a fully verified immutable baseline revision.
 type DraftRevisionReader interface {
-	Get(context.Context, project.ID, actor.Context, string, string) (domain.Revision, error)
+	Get(context.Context, access.Execution, string, string) (domain.Revision, error)
 }
 
 // DraftClock supplies deterministic workflow timestamps in tests.

@@ -1,6 +1,6 @@
 <!--
     Panvara
-    docs/getting-started/local-environment.md    2026-07-14
+    docs/getting-started/local-environment.md    2026-07-18
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -47,7 +47,7 @@ make local-init
 
 首次执行会创建两个不会提交到 Git 的文件：
 
-- `.env`：数据库地址、模型文件、项目语言、时区和币种等普通开发配置。
+- `.env`：数据库地址、模型文件、Project 设置和默认 Environment Key 等普通开发配置。
 - `.env.local`：随机生成的本地管理员 Token，权限限制为当前用户读取。
 
 再次执行不会覆盖已有配置或 Token。每个新终端都需要加载它们：
@@ -60,6 +60,10 @@ set +a
 ```
 
 这几行只把配置载入当前终端。Panvara 不会自动读取 `.env`，也不会把 Token 写入日志。
+
+新生成的 `.env` 包含 `PANVARA_ENVIRONMENT_KEY=default`。如果 `.env` 来自较早版本，可以手工补上这一行；不补时 Server 的内置默认值也是 `default`。当前 Project ID 第一次由 Server 装配时会持久化 Project、生成 UUIDv7 默认 Environment，并创建 `bootstrap-admin` Principal 与 `project.owner` Grant。后续以同一 Project ID 启动时，其 Project/Environment 设置必须与数据库一致，漂移会拒绝启动；新的 Project ID 与唯一 Key 会创建另一套隔离事实，不会迁移旧数据。
+
+管理员 Token 只把请求认证为 `bootstrap-admin`，持久化 Grant 才决定 Admin 授权。撤销 Grant 后同一 Token 会失去权限，重启 Server 也不会自动恢复。完整说明和可回滚的本地验收步骤见[执行作用域与访问内核指南](../modules/project-access.md)；P0-01a 仍不包含完整 IAM 或多 Environment 数据隔离。
 
 ::: danger 不要提交本地密钥
 `.env` 和 `.env.local` 已被 `.gitignore` 排除。不要删除忽略规则，也不要把真实 Token 复制到模块 YAML、README、Issue 或聊天记录中。

@@ -23,10 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shezw/panvara/internal/application/access"
 	application "github.com/shezw/panvara/internal/application/appmodule"
-	"github.com/shezw/panvara/internal/domain/actor"
 	"github.com/shezw/panvara/internal/domain/appmodule"
-	"github.com/shezw/panvara/internal/domain/project"
 )
 
 const (
@@ -37,9 +36,9 @@ const (
 
 // RevisionRegistryService is the owner-authorized read boundary consumed by HTTP.
 type RevisionRegistryService interface {
-	List(context.Context, project.ID, actor.Context, string, int) ([]appmodule.RevisionSummary, error)
-	Get(context.Context, project.ID, actor.Context, string, string) (appmodule.Revision, error)
-	GetSource(context.Context, project.ID, actor.Context, string, string) (application.RevisionSource, error)
+	List(context.Context, access.Execution, string, int) ([]appmodule.RevisionSummary, error)
+	Get(context.Context, access.Execution, string, string) (appmodule.Revision, error)
+	GetSource(context.Context, access.Execution, string, string) (application.RevisionSource, error)
 }
 
 type revisionResponse struct {
@@ -74,11 +73,11 @@ func (handler *Handler) handleRevisionCollection(writer http.ResponseWriter, req
 		writeProblem(writer, request, problem)
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
-	values, err := handler.revisions.List(request.Context(), projectID, owner, request.PathValue("module"), limit)
+	values, err := handler.revisions.List(request.Context(), execution, request.PathValue("module"), limit)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
 		return
@@ -95,12 +94,12 @@ func (handler *Handler) handleRevisionItem(writer http.ResponseWriter, request *
 	if !requireMethod(writer, request, http.MethodGet) {
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
 	value, err := handler.revisions.Get(
-		request.Context(), projectID, owner, request.PathValue("module"), request.PathValue("revision"),
+		request.Context(), execution, request.PathValue("module"), request.PathValue("revision"),
 	)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
@@ -114,12 +113,12 @@ func (handler *Handler) handleRevisionSource(writer http.ResponseWriter, request
 	if !requireMethod(writer, request, http.MethodGet) {
 		return
 	}
-	projectID, owner, ok := handler.revisionIdentity(writer, request)
+	execution, ok := handler.revisionExecution(writer, request)
 	if !ok {
 		return
 	}
 	source, err := handler.revisions.GetSource(
-		request.Context(), projectID, owner, request.PathValue("module"), request.PathValue("revision"),
+		request.Context(), execution, request.PathValue("module"), request.PathValue("revision"),
 	)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
@@ -146,16 +145,16 @@ func (handler *Handler) handleRevisionSource(writer http.ResponseWriter, request
 	_, _ = writer.Write(source.Bytes)
 }
 
-func (handler *Handler) revisionIdentity(
+func (handler *Handler) revisionExecution(
 	writer http.ResponseWriter,
 	request *http.Request,
-) (project.ID, actor.Context, bool) {
-	identity, ok := IdentityFromContext(request.Context())
-	if !ok || !identity.Project.ID().Valid() || !identity.Actor.Valid() || identity.Actor.Anonymous() {
+) (access.Execution, bool) {
+	execution, ok := ExecutionFromContext(request.Context())
+	if !ok || execution.Actor().Anonymous() || execution.Surface() != access.SurfaceAdmin {
 		writeError(writer, request, http.StatusForbidden, "forbidden", "project owner access is required", nil)
-		return project.ID{}, actor.Context{}, false
+		return access.Execution{}, false
 	}
-	return identity.Project.ID(), identity.Actor, true
+	return execution, true
 }
 
 func makeRevisionSummaryResponse(value appmodule.RevisionSummary) revisionResponse {

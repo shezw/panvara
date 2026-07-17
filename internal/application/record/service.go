@@ -20,23 +20,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+
+	"github.com/shezw/panvara/internal/application/access"
 )
 
 // Service coordinates schema validation, identity generation, and persistence.
 type Service struct {
-	store     Store
-	validator Validator
-	clock     Clock
-	ids       IDGenerator
+	store      Store
+	validator  Validator
+	authorizer access.Authorizer
+	clock      Clock
+	ids        IDGenerator
 }
 
 // NewService constructs a record application service with explicit dependencies.
-func NewService(store Store, validator Validator, clock Clock, ids IDGenerator) (*Service, error) {
+func NewService(
+	store Store,
+	validator Validator,
+	authorizer access.Authorizer,
+	clock Clock,
+	ids IDGenerator,
+) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("%w: nil record store", ErrInvalidArgument)
 	}
 	if validator == nil {
 		return nil, fmt.Errorf("%w: nil record validator", ErrInvalidArgument)
+	}
+	if authorizer == nil {
+		return nil, fmt.Errorf("%w: nil record authorizer", ErrInvalidArgument)
 	}
 	if clock == nil {
 		return nil, fmt.Errorf("%w: nil record clock", ErrInvalidArgument)
@@ -44,26 +56,28 @@ func NewService(store Store, validator Validator, clock Clock, ids IDGenerator) 
 	if ids == nil {
 		return nil, fmt.Errorf("%w: nil record id generator", ErrInvalidArgument)
 	}
-	return &Service{store: store, validator: validator, clock: clock, ids: ids}, nil
+	return &Service{
+		store: store, validator: validator, authorizer: authorizer, clock: clock, ids: ids,
+	}, nil
 }
 
 // NewDefaultService uses the system clock and cryptographic UUIDv7 generator.
-func NewDefaultService(store Store, validator Validator) (*Service, error) {
-	return NewService(store, validator, SystemClock{}, NewDefaultUUIDv7Generator())
+func NewDefaultService(store Store, validator Validator, authorizer access.Authorizer) (*Service, error) {
+	return NewService(store, validator, authorizer, SystemClock{}, NewDefaultUUIDv7Generator())
 }
 
 // Create validates and atomically persists a new record and its derived indexes.
 func (service *Service) Create(
 	ctx context.Context,
+	execution access.Execution,
 	scope Scope,
-	surface Surface,
 	data json.RawMessage,
 ) (Record, error) {
-	if err := scope.Validate(); err != nil {
+	surface, err := service.authorize(
+		ctx, execution, scope, access.OperationRecordCreate, OperationCreate,
+	)
+	if err != nil {
 		return Record{}, err
-	}
-	if !surface.Valid() {
-		return Record{}, fmt.Errorf("%w: invalid write surface %q", ErrInvalidArgument, surface)
 	}
 	validated, err := service.validate(ctx, ValidationInput{
 		Scope: scope, Surface: surface, Mutation: MutationCreate, Data: data,
@@ -87,8 +101,18 @@ func (service *Service) Create(
 }
 
 // Get returns one live record from the exact schema revision scope.
-func (service *Service) Get(ctx context.Context, scope Scope, id ID) (Record, error) {
+func (service *Service) Get(
+	ctx context.Context,
+	execution access.Execution,
+	scope Scope,
+	id ID,
+) (Record, error) {
 	if err := validateIdentity(scope, id); err != nil {
+		return Record{}, err
+	}
+	if _, err := service.authorize(
+		ctx, execution, scope, access.OperationRecordGet, OperationGet,
+	); err != nil {
 		return Record{}, err
 	}
 	record, err := service.store.Get(ctx, scope, id)
@@ -101,15 +125,15 @@ func (service *Service) Get(ctx context.Context, scope Scope, id ID) (Record, er
 // List returns a bounded stable page of live records.
 func (service *Service) List(
 	ctx context.Context,
+	execution access.Execution,
 	scope Scope,
-	surface Surface,
 	options ListOptions,
 ) (ListResult, error) {
-	if err := scope.Validate(); err != nil {
+	surface, err := service.authorize(
+		ctx, execution, scope, access.OperationRecordList, OperationList,
+	)
+	if err != nil {
 		return ListResult{}, err
-	}
-	if !surface.Valid() {
-		return ListResult{}, fmt.Errorf("%w: invalid list surface %q", ErrInvalidArgument, surface)
 	}
 	if options.Limit < 0 || options.Limit > MaxListLimit {
 		return ListResult{}, fmt.Errorf("%w: list limit must be between 0 and %d", ErrInvalidArgument, MaxListLimit)
@@ -161,17 +185,20 @@ func (service *Service) List(
 // Nested values are replaced. Explicit null is unsupported in alpha.2.
 func (service *Service) Update(
 	ctx context.Context,
+	execution access.Execution,
 	scope Scope,
 	id ID,
 	expectedVersion uint64,
-	surface Surface,
 	patch json.RawMessage,
 ) (Record, error) {
 	if err := validateMutation(scope, id, expectedVersion); err != nil {
 		return Record{}, err
 	}
-	if !surface.Valid() {
-		return Record{}, fmt.Errorf("%w: invalid write surface %q", ErrInvalidArgument, surface)
+	surface, err := service.authorize(
+		ctx, execution, scope, access.OperationRecordPatch, OperationPatch,
+	)
+	if err != nil {
+		return Record{}, err
 	}
 	current, err := service.store.Get(ctx, scope, id)
 	if err != nil {
@@ -210,11 +237,17 @@ func (service *Service) Update(
 // references, and rejects deletion while live records still reference it.
 func (service *Service) Delete(
 	ctx context.Context,
+	execution access.Execution,
 	scope Scope,
 	id ID,
 	expectedVersion uint64,
 ) (Record, error) {
 	if err := validateMutation(scope, id, expectedVersion); err != nil {
+		return Record{}, err
+	}
+	if _, err := service.authorize(
+		ctx, execution, scope, access.OperationRecordDelete, OperationDelete,
+	); err != nil {
 		return Record{}, err
 	}
 	record, err := service.store.Delete(ctx, DeleteCommand{
@@ -224,6 +257,51 @@ func (service *Service) Delete(
 		return Record{}, fmt.Errorf("delete record: %w", err)
 	}
 	return cloneRecord(record), nil
+}
+
+func (service *Service) authorize(
+	ctx context.Context,
+	execution access.Execution,
+	scope Scope,
+	accessOperation access.Operation,
+	recordOperation Operation,
+) (Surface, error) {
+	if service == nil || service.authorizer == nil || service.validator == nil {
+		return "", fmt.Errorf("%w: uninitialized record service", ErrInvalidArgument)
+	}
+	if err := scope.Validate(); err != nil {
+		return "", err
+	}
+	if err := execution.Validate(); err != nil {
+		return "", err
+	}
+	if execution.Scope().ProjectID() != scope.ProjectID {
+		return "", access.ErrForbidden
+	}
+	if err := service.authorizer.Authorize(ctx, execution, accessOperation); err != nil {
+		return "", err
+	}
+	surface, err := recordSurface(execution.Surface())
+	if err != nil {
+		return "", err
+	}
+	if err := service.validator.AuthorizeOperation(ctx, OperationValidationInput{
+		Scope: scope, Surface: surface, Operation: recordOperation,
+	}); err != nil {
+		return "", fmt.Errorf("authorize record operation: %w", err)
+	}
+	return surface, nil
+}
+
+func recordSurface(surface access.Surface) (Surface, error) {
+	switch surface {
+	case access.SurfacePublic:
+		return SurfacePublic, nil
+	case access.SurfaceAdmin:
+		return SurfaceAdmin, nil
+	default:
+		return "", fmt.Errorf("%w: invalid access surface %q", ErrInvalidArgument, surface)
+	}
 }
 
 func (service *Service) validate(

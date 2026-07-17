@@ -1,6 +1,6 @@
 <!--
     Panvara
-    README.md    2026-07-15
+    README.md    2026-07-18
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -16,9 +16,9 @@
 
 Panvara 是面向中小开发团队的、数据模型驱动的可组合全栈框架。它希望用同一套 Core 构建 App、Website、管理后台和 E-commerce，并通过可替换 Provider 接入全球身份、支付、消息和存储能力。
 
-当前 Distribution 仍是 **v0.1.0-alpha.2**，已经形成“模型声明 → 编译与接口描述 → PostgreSQL CRUD → HTTP API”的最小闭环。当前开发分支另包含 **alpha.3a Revision Registry** 与 **alpha.3b Draft/Validate/Plan** 开发切片：前者不可变地登记启动模块，后者允许保存候选 Source、验证并解释变化；两者都不表示 alpha.3 发布生命周期已经完成。项目适合本地开发和架构验收，暂不适合直接承载生产业务。
+当前 Distribution 仍是 **v0.1.0-alpha.2**，已经形成“模型声明 → 编译与接口描述 → PostgreSQL CRUD → HTTP API”的最小闭环。当前开发分支另包含 **alpha.3a Revision Registry**、**alpha.3b Draft/Validate/Plan** 和 **Server Core P0-01a 执行作用域与访问内核** 开发切片：前两者登记启动模块、保存候选 Source 并在执行前解释变化；P0-01a 则持久化最小 Project/Environment/Principal/Grant 事实并把授权收口到 Application 层。这些切片都不表示 alpha.3 发布生命周期或完整 P0-01 已经完成。项目适合本地开发和架构验收，暂不适合直接承载生产业务。
 
-> **状态校正：** `server` Profile 当前只是有一条可运行的最小纵向装配，不表示 Server Core 已完成。身份与授权、发布/激活/回滚、迁移、审计、Outbox/Worker、Provider 和分布式收敛仍在 [Server Core 能力清单](docs/roadmap/server-core.md)；Manager 的完整范围和验收标准见 [Manager 路线图](docs/roadmap/manager.md)。
+> **状态校正：** `server` Profile 当前只是有一条可运行的最小纵向装配，不表示 Server Core 已完成。P0-01a 只建立 bootstrap Principal 与持久化 Owner Grant 的最小闭环；完整 IAM、多 Environment 数据隔离、发布/激活/回滚、迁移、审计、Outbox/Worker、Provider 和分布式收敛仍在 [Server Core 能力清单](docs/roadmap/server-core.md)。当前边界见[执行作用域与访问内核指南](docs/modules/project-access.md)，Manager 的完整范围和验收标准见 [Manager 路线图](docs/roadmap/manager.md)。
 
 ## 快速开始
 
@@ -56,18 +56,21 @@ make run-server
 
 要在不重启、不发布和不迁移数据的前提下体验“无效 Draft → 修正 → Validation → Change Plan”，请按 [Draft → Validate → Plan 完整验收](docs/getting-started/draft-plan-acceptance.md)操作。
 
+要确认某个 Project ID 首次启动时创建的持久化 Project、默认 Environment、`bootstrap-admin` Principal 与 `project.owner` Grant，并验收撤权后重启不会恢复权限，请按[执行作用域与访问内核指南](docs/modules/project-access.md)操作。
+
 ## 当前可以验收
 
 - 严格 YAML/JSON AppModule 和稳定的模型版本指纹。
 - 11 种字段类型、校验、唯一值、引用、等值过滤和软删除。
 - PostgreSQL 18.4 持久化与 Server 重启恢复。
-- Public Create 与 Bearer Token 保护的 Admin CRUD。
+- Public Create，以及“Bearer Token 认证 Principal + 持久化 Owner Grant 授权”的 Admin CRUD。
 - 生成的 OpenAPI 3.1 与 Manager UI Schema。
 - Lite 与 Server 两种运行方式。
 - alpha.3a 开发切片：启动时登记不可变 Module Revision 父制品、可按算法追加的 Data Schema Identities、原始 Source 与生成物，并提供项目 owner 只读 API。
 - alpha.3b 开发切片：保存带固定 Baseline 和 Draft Version 的候选 Source，以结构化 Validation 检查无效/有效输入，并生成确定性 Change Plan。
+- P0-01a 开发切片：某个 Project ID 首次由 Server 装配时持久化 Project，生成默认 Environment，并创建 `bootstrap-admin` Principal 与 Owner Grant；同一 Project ID 的相同配置重启幂等，设置漂移会拒绝启动，撤销 Grant 后重启不会自动补回。
 
-Manager UI Schema 只是前端可消费的描述，尚未包含可视化 Manager。模块 Publish/Activate/Rollback、数据迁移、完整身份、Provider、支付、Outbox、Worker 和分布式管理也仍在后续阶段。
+Manager UI Schema 只是前端可消费的描述，尚未包含可视化 Manager。P0-01a 也不是完整 IAM，现有 Record、Revision 与 Draft 表尚无 `environment_id`，不能声称已经实现多 Environment 数据隔离。模块 Publish/Activate/Rollback、数据迁移、完整身份、Provider、支付、Outbox、Worker 和分布式管理仍在后续阶段。
 
 > **登记不等于发布或激活。** Registry List 不表达当前运行 Revision；该值必须读取 OpenAPI 的 `x-panvara-revision`。alpha.3a 不改变 Record namespace，也没有 Publish、Activate、Rollback 或热切换 API。
 
@@ -94,6 +97,7 @@ make docs-serve
 
 - [使用与验收 Guideline](docs/getting-started/index.md)
 - [模块指南](docs/modules/index.md)
+- [执行作用域与访问内核指南](docs/modules/project-access.md)
 - [Revision Registry 指南](docs/modules/revision-registry.md)
 - [Revision Registry 完整验收](docs/getting-started/revision-registry-acceptance.md)
 - [Draft 与 Change Plan 指南](docs/modules/draft-planning.md)
@@ -112,6 +116,7 @@ make docs-serve
 - [ADR-0001：模块与数据结构身份](docs/adr/0001-module-data-revision-identities.md)
 - [ADR-0002：不可变 Revision Registry](docs/adr/0002-immutable-revision-registry.md)
 - [ADR-0003：版本化 Draft、Validation 与 Change Plan](docs/adr/0003-draft-validation-change-plan.md)
+- [ADR-0004：持久化执行作用域并在 Application 层授权](docs/adr/0004-persistent-execution-scope-access-kernel.md)
 
 ## License
 
