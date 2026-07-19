@@ -47,7 +47,7 @@ set -a; . ./.env; . ./.env.local; set +a
 | `make test` | 单元测试和 Fuzz seed corpus | 否 |
 | `make test-race` | Race Detector | 否 |
 | `make verify` | fmt-check、vet、test、race、build | 否 |
-| `make test-integration` | PostgreSQL Record Store、不可变 Revision Registry 与 migration 集成测试 | 是，或提供测试数据库 URL |
+| `make test-integration` | PostgreSQL Record、Registry、Draft、Release Publish 事务与 migration 集成测试 | 是，或提供测试数据库 URL |
 | `make test-server-smoke` | 真实 Server HTTP、Registry 重启幂等与 Record 持久化链路 | 是，或提供测试数据库 URL |
 | `make test-e2e` | 依次运行两个必需集成目标 | 是，或提供测试数据库 URL |
 

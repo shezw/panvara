@@ -58,9 +58,26 @@ func (store *RevisionStore) Register(
 		return appmodule.Revision{}, false, fmt.Errorf("begin PostgreSQL module revision registration: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	stored, created, err := registerModuleRevisionTx(ctx, tx, validated)
+	if err != nil {
+		return appmodule.Revision{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return appmodule.Revision{}, false, fmt.Errorf("commit PostgreSQL module revision registration: %w", err)
+	}
+	return stored, created, nil
+}
 
+// registerModuleRevisionTx inserts or verifies one revision inside a caller-
+// owned transaction. Publish uses this helper so Revision and Release facts
+// can never commit independently.
+func registerModuleRevisionTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	validated appmodule.Revision,
+) (appmodule.Revision, bool, error) {
 	var inserted int
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		INSERT INTO panvara_module_revision (
 			project_id, module_name, revision_hash, module_version,
 			spec_version, ir_format,
@@ -96,9 +113,6 @@ func (store *RevisionStore) Register(
 	stored, err := getModuleRevision(ctx, tx, validated.ProjectID(), validated.ModuleName(), validated.RevisionHash())
 	if err != nil {
 		return appmodule.Revision{}, false, fmt.Errorf("read registered PostgreSQL module revision: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return appmodule.Revision{}, false, fmt.Errorf("commit PostgreSQL module revision registration: %w", err)
 	}
 	return stored, created, nil
 }

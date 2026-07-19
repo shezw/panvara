@@ -22,13 +22,14 @@
 
 ## 当前状态
 
-当前 Distribution 对应 **Panvara v0.1.0-alpha.2**。alpha.2 已经形成“声明模型 → 启动 Server → PostgreSQL 持久化 → HTTP CRUD”的最小闭环；当前开发分支另包含 alpha.3a Revision Registry、alpha.3b Draft/Validate/Plan、Server Core P0-01a 执行作用域/访问内核与 P0-01b Project-local 访问管理切片，但仍是实验版本。
+当前 Distribution 对应 **Panvara v0.1.0-alpha.2**。alpha.2 已经形成“声明模型 → 启动 Server → PostgreSQL 持久化 → HTTP CRUD”的最小闭环；当前开发分支另包含 alpha.3a Revision Registry、alpha.3b Draft/Validate/Plan、P0-02a Publish Facts、Server Core P0-01a 执行作用域/访问内核与 P0-01b Project-local 访问管理切片，但仍是实验版本。
 
 | 指南 | 当前状态 | 适合解决的问题 |
 | --- | --- | --- |
 | [AppModule](appmodule.md) | alpha.2 声明/编译切片 | 怎样用 YAML/JSON 描述数据、API 和管理界面信息 |
 | [Revision Registry](revision-registry.md) | alpha.3a 开发切片 | 怎样查询不可变启动 Revision 与第一次登记的 Source |
 | [Draft 与 Change Plan](draft-planning.md) | alpha.3b 开发切片 | 怎样保存候选 Source、定位错误并在执行前解释变化 |
+| [Module Release 发布事实](release-publishing.md) | P0-02a runnable slice | 怎样把有效 Plan 发布为不可变事实，并证明没有激活或迁移 |
 | [Record Runtime](record-runtime.md) | alpha.2 基础 CRUD 切片 | 数据如何创建、读取、修改、删除和校验 |
 | [HTTP API](http-api.md) | alpha.2 基础接口切片 | 怎样通过 `curl` 或其他客户端调用 Panvara |
 | [运行模式](runtime-profiles.md) | Lite/Server 可运行装配 | 什么时候不需要数据库，什么时候需要 PostgreSQL |
@@ -37,7 +38,7 @@
 | [Project-local 访问管理](access-administration.md) | P0-01b runnable slice；不是完整 P0-01/IAM | 怎样管理 Service Principal、一次性 Credential、固定 Owner Grant、轮换与终态 |
 | [CRM Leads](crm-leads.md) | alpha.2 参考纵向切片 | 怎样从零验收一条真实业务链路 |
 
-文档中出现“计划”“alpha.3+”的内容均不能作为当前验收结果；只有明确标注 alpha.3a、alpha.3b、P0-01a 或 P0-01b 切片的能力可以按对应 Guideline 验收。alpha.3b 的 Plan 不表示 Publish、Activate 或迁移已经实现，P0-01b 也不表示 Account/ExternalIdentity/Session/ProjectMembership、动态 Role/Policy、RecordOwner 或多 Environment 数据隔离已经实现。
+文档中出现“计划”“alpha.3+”的内容均不能作为当前验收结果；只有明确标注 alpha.3a、alpha.3b、P0-01a、P0-01b 或 P0-02a 切片的能力可以按对应 Guideline 验收。alpha.3b 的 Plan 不表示发布；P0-02a 的 Publish 不表示 Activate 或迁移；P0-01b 也不表示 Account/ExternalIdentity/Session/ProjectMembership、动态 Role/Policy、RecordOwner 或多 Environment 数据隔离已经实现。
 
 ## 前置条件
 
@@ -64,7 +65,8 @@
 6. 在 [HTTP API](http-api.md) 中确认认证、ETag 和错误响应。
 7. 在 [Revision Registry](revision-registry.md) 中确认启动 Revision 只登记一次。
 8. 在 [Draft 与 Change Plan](draft-planning.md) 中保存无效候选，修正后检查变化计划。
-9. 在 [AppModule](appmodule.md) 中复制最小模型，开始定义自己的模块。
+9. 在 [Module Release 发布事实](release-publishing.md) 中发布有效 Plan，确认 Candidate 进入 Registry 但 Runtime 不变。
+10. 在 [AppModule](appmodule.md) 中复制最小模型，开始定义自己的模块。
 
 只想快速确认代码质量时，在仓库根目录执行：
 
@@ -98,7 +100,7 @@ make verify
 - 说明模型或数据升级是否安全。
 - 所有站内链接可从本页到达。
 
-当前技术门禁见 [验证测试框架](../testing.md)。这些门禁包含 P0-01a/P0-01b 最小访问闭环，但不等于完整 P0-01。非专业验收者先完成[执行作用域与访问内核](project-access.md#验收)、[Project-local 访问管理](access-administration.md#验收)及 [CRM Leads](crm-leads.md) 用户旅程，再按 [Revision Registry 完整验收](../getting-started/revision-registry-acceptance.md)和 [Draft → Validate → Plan 完整验收](../getting-started/draft-plan-acceptance.md)依次验证 alpha.3a 与 alpha.3b 开发切片。
+当前技术门禁见 [验证测试框架](../testing.md)。这些门禁包含 P0-01a/P0-01b 最小访问闭环与 P0-02a Publish Facts，但不等于完整 P0-01/P0-02。非专业验收者先完成[执行作用域与访问内核](project-access.md#验收)、[Project-local 访问管理](access-administration.md#验收)及 [CRM Leads](crm-leads.md) 用户旅程，再按 [Revision Registry 完整验收](../getting-started/revision-registry-acceptance.md)、[Draft → Validate → Plan 完整验收](../getting-started/draft-plan-acceptance.md)和 [Draft → Publish 完整验收](../getting-started/draft-publish-acceptance.md)依次验证。
 
 ## 常见问题
 
@@ -120,11 +122,15 @@ Lite 可以；Server 和 Record Runtime 不可以。
 
 ### 有 Registry 后还需要保存模块 Source 吗？
 
-Registry 会保存第一次登记的 Source，但 alpha.3a 没有发布、迁移或回滚流程。仍应把模型当作版本化源码维护，并在改变运行模型前备份数据库。
+Registry 会保存第一次登记的 Source，P0-02a 也能把有效 Candidate 发布为不可变事实；但当前没有 Activate、迁移或回滚流程。仍应把模型当作版本化源码维护，并在改变启动 Source 前备份数据库。
 
 ### Validation 通过后是否可以直接上线？
 
 不可以。Validation 只产生 Candidate 身份，Change Plan 只解释它相对 Baseline 的变化；Candidate 不进入 Registry，当前运行 Revision 和业务 Record 都不会改变。
+
+### Publish 成功后是否可以直接上线？
+
+不可以。P0-02a 会登记 Candidate Revision 和 Module Release，但响应明确为 `activated=false`、`runtime_changed=false`。当前运行 Revision 仍由启动配置决定。
 
 ### Token 正确是否就拥有 Admin 权限？
 
@@ -135,7 +141,7 @@ Registry 会保存第一次登记的 Source，但 alpha.3a 没有发布、迁移
 - 文档站本身只描述当前仓库能力，不代表 Panvara 已进入稳定版本。
 - alpha.2 只有 Lite 和 Server 两种可运行 Profile。
 - alpha.3a Registry 只有启动登记和 owner 只读接口，没有发布或活动版本管理。
-- alpha.3b 只有 Draft、Validation 与 Change Plan，没有 Draft UI、Publish、Activate 或数据迁移执行。
+- alpha.3b 只有 Draft、Validation 与 Change Plan；P0-02a 另有 Publish Facts，但仍没有 Draft UI、Activate、Rollback 或数据迁移执行。
 - P0-01b 只有 project-local Service Principal/API Credential 与固定 Owner Grant；没有 Account、ExternalIdentity、Session、ProjectMembership、动态 Role/Policy 或 RecordOwner。
 - Record、Revision 与 Draft 尚无 `environment_id`，只有默认 Environment 可以执行，未实现多 Environment 数据隔离。
 - 没有可视化 Manager、Provider Runtime、消息队列或分布式控制面。
@@ -149,6 +155,8 @@ Registry 会保存第一次登记的 Source，但 alpha.3a 没有发布、迁移
 Migration 0004 升级后，当前 Project ID 第一次由 Server 装配时会创建持久化 Project、生成默认 Environment，并创建 bootstrap Principal 与 Owner Grant。此后以同一 Project ID 启动时必须保持其 Project/Environment 设置一致；已撤销 Grant 不会因重启恢复。新的 Project ID 与唯一 Key 会创建另一套事实，不会迁移旧数据。该迁移没有给现有业务事实增加 `environment_id`，因此不能把升级解释为获得多 Environment 隔离。决策背景见 [ADR-0004](../adr/0004-persistent-execution-scope-access-kernel.md)。
 
 Migration 0005 在下一次启动时用原 bootstrap Token 原子写入 digest、hint、Credential 与永久 marker。marker 创建后重启可省略 Token；相同值可核对，不同值拒绝。任何 revoked/disabled 终态不会由启动或升级恢复。决策背景见 [ADR-0005](../adr/0005-project-local-access-administration.md)。
+
+Migration 0006 增加 append-only Module Release 与发布专用幂等绑定。它只追加发布事实，不改写旧 Revision、Draft、Plan 或 Record；未来 Activate/Rollback 必须引用 Release 并追加新事实。决策背景见 [ADR-0006](../adr/0006-immutable-module-release-publish-facts.md)。
 
 在 alpha.3 的发布与迁移能力完成前：
 

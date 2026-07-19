@@ -50,7 +50,7 @@ Panvara 可执行文件嵌入 Go 的 IANA Time Zone Database，避免精简容�
 - Minimal 全部能力。
 - PostgreSQL 18.4。
 - `crm-leads` YAML/JSON 模块文件。
-- P0-01a/P0-01b 持久化执行作用域、Credential 认证、访问管理与 Application Access Kernel；这不等于完整 P0-01、IAM 或多 Environment 数据隔离。
+- P0-01a/P0-01b 持久化执行作用域、Credential 认证、访问管理与 Application Access Kernel；P0-02a 不可变 Publish Facts。这不等于完整 P0-01/P0-02、IAM 或多 Environment 数据隔离。
 - 通过 `PANVARA_TEST_DATABASE_URL` 使用 PostgreSQL 18.4，或由集成测试启动一次性 Docker 容器；不复用手工 Compose 数据。
 - Mailpit 或 Console Email Adapter 延后到 alpha.3。
 
@@ -120,7 +120,7 @@ Panvara 不隐式加载 `.env`。需要覆盖默认值时，通过 Shell、IDE �
 | make fmt-check | 检查未格式化文件，不修改工作区 |
 | make test | 随机顺序运行单元和 seed corpus |
 | make test-race | 开启 Race Detector |
-| make test-integration | 强制运行 PostgreSQL 18.4 Store 集成测试，包含 P0-01a/P0-01b bootstrap marker、Credential/Grant 生命周期、last-owner 与审计约束；不可跳过 |
+| make test-integration | 强制运行 PostgreSQL 18.4 Store 集成测试，包含 Access 生命周期，以及 P0-02a Publish 幂等、并发、事务回滚、append-only 与升级约束；不可跳过 |
 | make test-server-smoke | 强制运行 Server HTTP/持久化 smoke，包含访问管理、轮换、撤权即时生效与重启不自动恢复；不可跳过 |
 | make test-e2e | 顺序运行以上两个当前 Server 必需集成目标；不代表完整 P0-01 已覆盖 |
 | make vet | Go 静态检查 |
@@ -162,7 +162,7 @@ Panvara 不隐式加载 `.env`。需要覆盖默认值时，通过 Shell、IDE �
 
 - Node.js 22：模块文档契约检查与 VitePress 静态构建。
 - Go 1.26.5：fmt-check、vet、unit、race、build。
-- PostgreSQL 18.4：独立 required Job 执行 `make test-e2e`；使用 Service URL，并设置 `PANVARA_REQUIRE_DOCKER=1`，测试不得 Skip。当前覆盖 P0-01a/P0-01b runnable slice，但不宣称完整 P0-01 或 IAM。
+- PostgreSQL 18.4：独立 required Job 执行 `make test-e2e`；使用 Service URL，并设置 `PANVARA_REQUIRE_DOCKER=1`，测试不得 Skip。当前覆盖 P0-01a/P0-01b 与 P0-02a runnable slice，但不宣称完整 P0-01/P0-02 或 IAM。
 - Go 1.25.12：vet、unit、build，且禁止工具链自动升级；不启动 Service、不执行 integration tag。
 
 `make verify` 保持快速且 Docker-free，PostgreSQL 门禁由独立 Job 并行执行。这样个人开发者可以快速迭代，又不会让 PR 绕过真实数据库语义。

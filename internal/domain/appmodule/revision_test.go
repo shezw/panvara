@@ -99,6 +99,35 @@ func TestRevisionArtifactEqualityRetainsSourceProvenance(t *testing.T) {
 	}
 }
 
+func TestRevisionAcceptsPublishProvenanceAndRejectsCrossedOrigins(t *testing.T) {
+	t.Parallel()
+	published := validRevisionMaterial(t)
+	published.Origin = RevisionOriginPublish
+	published.RegisteredBy = "svc:publisher"
+	revision, err := NewRevision(published)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision.Origin() != RevisionOriginPublish || revision.RegisteredBy() != "svc:publisher" {
+		t.Fatalf("published revision provenance = %q/%q", revision.Origin(), revision.RegisteredBy())
+	}
+	summary, err := NewRevisionSummary(revision.Summary().material)
+	if err != nil || summary.Origin() != RevisionOriginPublish {
+		t.Fatalf("published summary = %#v, %v", summary, err)
+	}
+	for _, change := range []func(*RevisionMaterial){
+		func(value *RevisionMaterial) { value.RegisteredBy = "system:bootstrap" },
+		func(value *RevisionMaterial) { value.RegisteredBy = "bad actor" },
+		func(value *RevisionMaterial) { value.Origin = RevisionOrigin("unknown") },
+	} {
+		invalid := published
+		change(&invalid)
+		if _, err := NewRevision(invalid); err == nil {
+			t.Fatal("NewRevision() accepted crossed publish provenance")
+		}
+	}
+}
+
 func validRevisionMaterial(t *testing.T) RevisionMaterial {
 	t.Helper()
 	projectID, err := project.ParseID("01981234-5678-7abc-8def-0123456789ab")

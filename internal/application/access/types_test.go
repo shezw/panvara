@@ -147,6 +147,8 @@ func allOperations() []Operation {
 		OperationDraftPlan,
 		OperationDraftGetValidation,
 		OperationDraftGetPlan,
+		OperationReleasePublish,
+		OperationReleaseGet,
 		OperationPrincipalList,
 		OperationPrincipalCreate,
 		OperationPrincipalDisable,
@@ -157,6 +159,37 @@ func allOperations() []Operation {
 		OperationProjectOwnerList,
 		OperationProjectOwnerGrant,
 		OperationProjectOwnerRevoke,
+	}
+}
+
+func TestNewMutationContextRequiresAdminMutationOperation(t *testing.T) {
+	t.Parallel()
+	scope := testScope(t, testProjectID, testEnvironmentID)
+	execution := mustExecution(t, scope, testActor(t, testProjectID, "owner", nil), SurfaceAdmin)
+	invocation, err := NewInvocation(execution, "request-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutation, err := NewMutationContext(invocation, OperationReleasePublish)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mutation.Validate(); err != nil || mutation.Operation() != OperationReleasePublish || mutation.RequestID() != "request-1" {
+		t.Fatalf("MutationContext = %#v, validate = %v", mutation, err)
+	}
+	if _, err := NewMutationContext(invocation, OperationReleaseGet); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("read operation error = %v, want ErrInvalid", err)
+	}
+	publicExecution, err := NewPublicExecution(scope, testAnonymous(t, testProjectID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicInvocation, err := NewInvocation(publicExecution, "request-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewMutationContext(publicInvocation, OperationReleasePublish); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("public mutation error = %v, want ErrInvalid", err)
 	}
 }
 

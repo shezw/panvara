@@ -52,6 +52,25 @@
       ]
     },
     {
+      "id": "release-publishing",
+      "name": "Immutable Module Release Publishing",
+      "status": "P0-02a runnable slice",
+      "sourcePaths": [
+        "internal/domain/release",
+        "internal/application/release",
+        "internal/infrastructure/postgres/release_store.go",
+        "internal/interfaces/httpapi/release_handler.go",
+        "db/migrations/0006_module_publish_facts.sql"
+      ],
+      "guide": "docs/modules/release-publishing.md",
+      "acceptance": [
+        "make test",
+        "make test-integration",
+        "make test-server-smoke",
+        "make docs-check"
+      ]
+    },
+    {
       "id": "record-runtime",
       "name": "Record Runtime",
       "status": "alpha.2 basic CRUD slice",

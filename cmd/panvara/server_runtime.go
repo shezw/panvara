@@ -26,6 +26,7 @@ import (
 	"github.com/shezw/panvara/internal/application/access"
 	appmodule "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/application/record"
+	releaseapp "github.com/shezw/panvara/internal/application/release"
 	"github.com/shezw/panvara/internal/domain/actor"
 	"github.com/shezw/panvara/internal/domain/project"
 	"github.com/shezw/panvara/internal/infrastructure/postgres"
@@ -168,6 +169,14 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	if err != nil {
 		return nil, err
 	}
+	releaseStore, err := postgres.NewReleaseStore(pool)
+	if err != nil {
+		return nil, err
+	}
+	releases, err := composeReleasePublisher(releaseStore, authorizer, accessStore)
+	if err != nil {
+		return nil, err
+	}
 	store, err := postgres.NewStore(pool)
 	if err != nil {
 		return nil, err
@@ -183,7 +192,7 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	router, err := httpapi.New(httpapi.Config{
 		Project: projectContext, Scope: executionScope,
 		PublicActor: publicActor, Module: module, Records: records,
-		Revisions: revisions, Drafts: drafts, AdminAuth: auth,
+		Revisions: revisions, Drafts: drafts, Releases: releases, AdminAuth: auth,
 		AccessAdministration: accessAdministration,
 	})
 	if err != nil {
@@ -194,6 +203,18 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 		handler: router, module: module.Name(), revision: module.RevisionHash(),
 		ready: &databaseReadiness{pool: pool, timeout: 500 * time.Millisecond}, close: pool.Close,
 	}, nil
+}
+
+func composeReleasePublisher(
+	store *postgres.ReleaseStore,
+	authorizer access.Authorizer,
+	denied access.DeniedAuditor,
+) (*releaseapp.Publisher, error) {
+	publisher, err := releaseapp.NewDefaultPublisher(store, store, authorizer, denied)
+	if err != nil {
+		return nil, fmt.Errorf("construct module release publisher: %w", err)
+	}
+	return publisher, nil
 }
 
 type databaseReadiness struct {

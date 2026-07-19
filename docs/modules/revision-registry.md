@@ -14,8 +14,8 @@
 
 # Revision Registry 使用指南
 
-::: danger 登记不等于发布或激活
-alpha.3a 的 Registry 只保存 Server 启动时成功编译的不可变事实。它不会发布、激活、回滚或热切换模块；当前运行 Revision 必须从 OpenAPI 的 `x-panvara-revision` 读取，不能取 List 第一项。
+::: danger 登记或发布都不等于激活
+Registry 保存 Server 启动或 P0-02a Publish 成功登记的不可变制品。它不会激活、回滚或热切换模块；当前运行 Revision 必须从 OpenAPI 的 `x-panvara-revision` 读取，不能取 List 第一项或最新 Release。
 :::
 
 ## 用途
@@ -26,7 +26,7 @@ Revision Registry 保存每个项目中已成功编译的 AppModule Source、Can
 
 该能力是 **alpha.3a 开发切片**；Panvara Distribution 仍为 `v0.1.0-alpha.2`。
 
-当前已实现：Server 启动登记、PostgreSQL 追加式存储、项目 owner 只读 API、Source 下载与 ETag，以及 Detail/Source 读取时重新编译校验。List 只读取有界元数据，不加载 Source 或生成物。alpha.3b 的 Draft/Validation/Plan 是引用 Registry Baseline 的独立控制面，不会修改 Registry；Publish、Activate、Rollback、活动版本指针和运行时热切换仍不存在。
+当前已实现：Server 启动登记、P0-02a Publish 幂等登记 Candidate、PostgreSQL 追加式存储、项目 owner 只读 API、Source 下载与 ETag，以及 Detail/Source 读取时重新编译校验。List 只读取有界元数据，不加载 Source 或生成物。alpha.3b 的 Draft/Validation/Plan 本身不会修改 Registry；P0-02a Publish 会登记可复验 Candidate，但 Activate、Rollback、活动版本指针和运行时热切换仍不存在。
 
 ## 前置条件
 
@@ -76,7 +76,8 @@ List 与 Detail 带 `Cache-Control: private, no-store`。Source 的 Content-Type
 2. 当前 OpenAPI Revision 在 List 中恰好出现一次。
 3. 相同 Source 和同一 Panvara 构建重启后，`registered_at`、`source_hash` 和 `data_schema_identities` 不变。
 4. 等价 YAML 使用同一 Revision，并继续返回第一次登记的 Source 字节。
-5. 对 Detail 发送 DELETE 返回 405，不会删除记录。
+5. Publish Candidate 后可读取它；若 Revision 早已存在，首次 provenance 不会被覆盖。
+6. 对 Detail 发送 DELETE 返回 405，不会删除记录。
 
 工程门禁对应 `make test`、`make test-integration`、`make test-server-smoke` 和 `make docs-check`。
 
@@ -104,16 +105,16 @@ Detail 与 Source 会重新编译保存的 Source 并核对所有制品。持久
 
 ## 当前限制
 
-- 只登记 Server 启动时加载的单个模块，没有上传或远程登记 API。
+- 只登记 Server 启动 Source 或经当前 Draft/Plan Publish 的 Candidate，没有通用上传或远程登记 API。
 - 只有 bootstrap `project.owner` 可读，没有账号体系和细粒度角色。
 - List 没有 cursor，单次最多 100 条。
 - 完整制品存放于 PostgreSQL，尚未外置到对象存储。
-- 不提供更新、删除、发布、激活、回滚和热加载。
-- alpha.3b Candidate 只有 Validation 身份，不会因为生成 Plan 自动进入 Registry。
+- 不提供更新、删除、激活、回滚和热加载；Publish 由独立 Release 用例负责。
+- alpha.3b Candidate 不会因为生成 Plan 自动进入 Registry；只有显式 P0-02a Publish 才会登记。
 - Registry 不改变 Record namespace；当前仍由完整 Module Revision 隔离数据。
 
 ## 兼容与升级
 
 Registry 表由 forward-only 数据库迁移创建，父 Revision 与子 Data Schema Identity 都不得直接 UPDATE、DELETE 或 TRUNCATE。Module Revision、按 format 选择的 Data Schema Identity、Source Hash 和各自格式号是不同版本轴，升级时必须分别比较。
 
-alpha.3a/alpha.3b 是开发切片，不提升 Distribution 版本，也不表示 alpha.3 发布生命周期已经完成。Draft Planning 还必须遵守 [ADR-0003](../adr/0003-draft-validation-change-plan.md)；后续 Publish/Activate 设计必须引用三份 ADR，并保持现有事实可验证、不可改写。
+alpha.3a/alpha.3b/P0-02a 是开发切片，不提升 Distribution 版本，也不表示完整发布生命周期已经完成。Draft Planning 与 Publish 分别遵守 [ADR-0003](../adr/0003-draft-validation-change-plan.md)和 [ADR-0006](../adr/0006-immutable-module-release-publish-facts.md)；后续 Activate 必须保持现有事实可验证、不可改写。

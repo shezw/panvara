@@ -103,6 +103,19 @@ CRM 示例要求组织名称和邮箱在同一模型版本中唯一。更换示�
 
 这是 alpha.2 的已知版本隔离行为。恢复原来的 `examples/modules/crm-leads.yaml` 内容并重启，旧数据会重新可见。不要反复修改生产模型；当前版本尚无自动数据迁移。
 
+## Publish 成功但 API 仍是旧模型
+
+这是 P0-02a 的正确行为。`published=true` 只表示 Candidate Revision 和 Module Release 已形成不可变事实；同一响应应显示 `activated=false`、`records_migrated=false`、`runtime_changed=false` 与 `activation_supported=false`。当前运行 Revision 仍从 OpenAPI 顶层 `x-panvara-revision` 读取。
+
+## Publish 返回 409、422 或 503
+
+- `409 idempotency_key_conflict`：同一个 Key 已用于另一发布意图；恢复不确定请求时必须用原 Key 和原 `plan_id`，不要随意换 Body。
+- `409 stale_plan`：Draft 已有新代次或 Source 已变化；重新 Validate、Plan，并人工复核新计划。
+- `422 not_publishable`：Plan 为 `unsupported` 或验证链不可发布；不能强制绕过。
+- `503 release_unavailable` / `access_unavailable`：数据库、制品复验或权威授权状态不可用；恢复依赖后用原 Key 重试，不要直接修改 Release 表。
+
+完整诊断流程见 [Module Release 发布事实](../modules/release-publishing.md#常见问题)。
+
 ## make infra-down 后数据仍然存在
 
 这是预期行为。普通停止不会删除数据卷。

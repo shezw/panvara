@@ -265,6 +265,8 @@ func TestPolicyPublicSurfaceRejectsRevisionAndDraftOperations(t *testing.T) {
 		OperationDraftPlan,
 		OperationDraftGetValidation,
 		OperationDraftGetPlan,
+		OperationReleasePublish,
+		OperationReleaseGet,
 	}
 	for _, operation := range operations {
 		if err := policy.Authorize(context.Background(), execution, operation); !errors.Is(err, ErrForbidden) {

@@ -347,7 +347,7 @@ func TestPostgresDraftWorkflowCASIdempotencySnapshotsAndIsolation(t *testing.T) 
 	`, projectID.String(), draft.ID().String())
 	for _, statement := range []string{
 		`TRUNCATE panvara_module_draft_validation CASCADE`,
-		`TRUNCATE panvara_module_draft_plan`,
+		`TRUNCATE panvara_module_draft_plan CASCADE`,
 	} {
 		assertDraftMutationRejected(t, ctx, pool, statement)
 	}

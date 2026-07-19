@@ -42,6 +42,8 @@ type RevisionOrigin string
 const (
 	// RevisionOriginBootstrap records the module loaded by Server bootstrap.
 	RevisionOriginBootstrap RevisionOrigin = "bootstrap"
+	// RevisionOriginPublish records a revision first registered by an authorized publish transaction.
+	RevisionOriginPublish RevisionOrigin = "publish"
 )
 
 // SourceFormat identifies the exact authoring bytes retained for provenance.
@@ -158,8 +160,8 @@ func NewRevision(material RevisionMaterial) (Revision, error) {
 	if err := validateCanonicalIdentity(material); err != nil {
 		return Revision{}, err
 	}
-	if material.Origin != RevisionOriginBootstrap || material.RegisteredBy != "system:bootstrap" {
-		return Revision{}, fmt.Errorf("revision bootstrap provenance is invalid")
+	if !validRevisionProvenance(material.Origin, material.RegisteredBy) {
+		return Revision{}, fmt.Errorf("revision registration provenance is invalid")
 	}
 	if material.RegisteredAt.IsZero() {
 		return Revision{}, fmt.Errorf("revision registration time is required")
@@ -309,11 +311,22 @@ func NewRevisionSummary(material RevisionSummaryMaterial) (RevisionSummary, erro
 	material.DataSchemaIdentities = identities
 	if material.IRFormat <= 0 || material.SpecVersion == "" || len(material.SpecVersion) > maxNameBytes ||
 		(material.SourceFormat != SourceFormatJSON && material.SourceFormat != SourceFormatYAML) ||
-		material.Origin != RevisionOriginBootstrap || material.RegisteredBy != "system:bootstrap" ||
+		!validRevisionProvenance(material.Origin, material.RegisteredBy) ||
 		material.RegisteredAt.IsZero() {
 		return RevisionSummary{}, fmt.Errorf("revision summary metadata is invalid")
 	}
 	return RevisionSummary{material: material}, nil
+}
+
+func validRevisionProvenance(origin RevisionOrigin, registeredBy string) bool {
+	switch origin {
+	case RevisionOriginBootstrap:
+		return registeredBy == "system:bootstrap"
+	case RevisionOriginPublish:
+		return registeredBy != "system:bootstrap" && validDraftActor(registeredBy)
+	default:
+		return false
+	}
 }
 
 // ProjectID returns the owning project boundary.

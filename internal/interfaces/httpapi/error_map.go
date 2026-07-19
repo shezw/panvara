@@ -22,6 +22,7 @@ import (
 	"github.com/shezw/panvara/internal/application/access"
 	appmodule "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/application/record"
+	releaseapp "github.com/shezw/panvara/internal/application/release"
 )
 
 func writeProblem(writer http.ResponseWriter, request *http.Request, problem *requestProblem) {
@@ -82,6 +83,18 @@ func (handler *Handler) writeApplicationError(writer http.ResponseWriter, reques
 		writeError(writer, request, http.StatusConflict, "draft_not_valid", "a current successful validation is required", nil)
 	case errors.Is(err, appmodule.ErrPlanNotFound):
 		writeError(writer, request, http.StatusNotFound, "plan_not_found", "module draft plan not found", nil)
+	case errors.Is(err, releaseapp.ErrInvalid):
+		writeError(writer, request, http.StatusBadRequest, "invalid_release_request", "module release request is invalid", nil)
+	case errors.Is(err, releaseapp.ErrNotFound):
+		writeError(writer, request, http.StatusNotFound, "release_not_found", "module release or publish plan was not found", nil)
+	case errors.Is(err, releaseapp.ErrIdempotencyConflict):
+		writeError(writer, request, http.StatusConflict, "idempotency_key_conflict", "Idempotency-Key was already used for another release intent", nil)
+	case errors.Is(err, releaseapp.ErrStale):
+		writeError(writer, request, http.StatusConflict, "stale_plan", "module release plan is stale", nil)
+	case errors.Is(err, releaseapp.ErrNotPublishable):
+		writeError(writer, request, http.StatusUnprocessableEntity, "not_publishable", "module release plan is not publishable", nil)
+	case errors.Is(err, releaseapp.ErrCorrupt), errors.Is(err, releaseapp.ErrUnavailable):
+		writeError(writer, request, http.StatusServiceUnavailable, "release_unavailable", "module release authority is unavailable", nil)
 	case errors.Is(err, context.DeadlineExceeded):
 		writeError(writer, request, http.StatusGatewayTimeout, "deadline_exceeded", "request deadline exceeded", nil)
 	case errors.Is(err, context.Canceled):

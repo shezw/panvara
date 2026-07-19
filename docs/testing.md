@@ -20,19 +20,19 @@
 
 每个缺陷修复先增加可复现回归测试；随机测试和 Fuzz 发现的最小样本进入 corpus。禁止用自动重试掩盖 Flaky Test。
 
-当前门禁包含 **Server Core P0-01a/P0-01b 可运行切片**，验证持久化执行作用域、Service Principal/API Credential/Owner Grant 管理与最小安全审计，不表示完整 P0-01、P0-05、IAM 或多 Environment 数据隔离已经完成。
+当前门禁包含 **Server Core P0-01a/P0-01b 与 P0-02a 可运行切片**，验证持久化执行作用域、Service Principal/API Credential/Owner Grant 管理、最小安全审计及不可变 Publish Facts，不表示完整 P0-01/P0-02、P0-05、IAM 或多 Environment 数据隔离已经完成。
 
 ## 2. 分层测试
 
 | 层 | 目标 | 工具与方式 | 当前状态 |
 | --- | --- | --- | --- |
-| Domain | Money、ProjectContext、Environment Scope、Principal/Credential/Grant、模型规则、不可变 Revision、版本化 Draft | testing、表驱动、property、fuzz | P0-01b 增加 project-local 身份、不可恢复 disable/revoke 与 Owner Grant 生命周期 |
-| Application | Access Kernel、Credential authentication/administration、Record、Revision、Draft/Validation/Plan | fake Port、失败注入、race | 固定 Operation、忽略 Actor 自报 Role、digest 验证、bootstrap marker 语义、终态与 fail closed |
-| HTTP | 状态码、严格 JSON/raw Source、认证、授权错误信封、ETag、幂等、OpenAPI | httptest、契约断言 | CRUD/Registry/Draft + P0-01b Access Administration；覆盖 401/403/503、一次性 Token 与 no-store |
-| PostgreSQL | migration、Project/Environment/Principal/Credential/Grant、安全审计、事务、分页与重启恢复 | PostgreSQL 18.4 Service URL 或临时 Docker | marker/digest、事务内二次授权、last-owner、显式重新授予与 append-only 审计；alpha.3b Draft integration |
+| Domain | Money、ProjectContext、Environment Scope、Principal/Credential/Grant、模型规则、不可变 Revision、版本化 Draft、Module Release | testing、表驱动、property、fuzz | P0-02a 增加 environment-scoped immutable Release、publish outcome 与 credential provenance |
+| Application | Access Kernel、Credential authentication/administration、Record、Revision、Draft/Validation/Plan、Release Publish/Get | fake Port、失败注入、race | Publish 在 snapshot 前解析重放；首次发布精确链复验、Source 重编译、stale/unsupported、固定 Operation 与 fail closed |
+| HTTP | 状态码、严格 JSON/raw Source、认证、授权错误信封、ETag、幂等、OpenAPI | httptest、契约断言 | CRUD/Registry/Draft/Release + P0-01b Access Administration；Release 覆盖 strict ASCII、重复/混淆字段、Location/no-store |
+| PostgreSQL | migration、Project/Environment/Principal/Credential/Grant、Release、安全审计、事务、分页与重启恢复 | PostgreSQL 18.4 Service URL 或临时 Docker | 重放解析短事务、首次 Publish 原子事务、append-only Release、升级与无半状态；既有 Access/Draft integration |
 | Provider | Adapter 是否满足 Capability | 共享 conformance suite | alpha.3 planned |
 | AppModule | 严格解码、IR、Data Schema Identity、OpenAPI、Manager Schema、恶意输入 | golden、fuzz、语义校验 | alpha.3a format 1 指纹差异矩阵已建立；迁移兼容矩阵待后续 alpha.3 |
-| Profile/E2E | Lite/Server 纵向闭环 | 真实 listener + PostgreSQL 18.4 | CRUD、Registry、Draft Plan、Credential 轮换、Grant 撤销/显式重新授予与重启不自动恢复共同验证 |
+| Profile/E2E | Lite/Server 纵向闭环 | 真实 listener + PostgreSQL 18.4 | CRUD、Registry、Draft Plan、Publish/重放/重启不改变 Runtime/Record，以及 Credential/Grant 生命周期共同验证 |
 | Non-functional | race、benchmark、load、fault | Go race/bench + 专项压测 | 基础 race 已建立 |
 | Supply chain | 漏洞、SBOM、许可、签名 | govulncheck、生成/验证工具 | RC 前 |
 | Documentation | 模块指南、内部链接、静态站点、Golden Path | manifest contract、VitePress build、人工/E2E 复核 | alpha.2 基础门禁同步覆盖 P0-01a 的能力与限制说明 |
@@ -51,8 +51,8 @@ Docker-free 的 `make verify` 依次验证：
 
 独立 required integration Job 使用 Go 1.26.5 与 PostgreSQL 18.4 Service 执行 `make test-e2e`：
 
-1. `make test-integration` 验证 fresh/idempotent migration、逐版升级、Record/Registry/Draft 事实，以及 P0-01a/P0-01b 的 Project/Environment/Principal/Credential/Grant、marker/digest、并发与幂等重启、配置冲突、终态、last-owner、事务审计和 append-only 约束。
-2. `make test-server-smoke` 验证 Artifact、CRUD、Registry、Draft 真实 HTTP 旅程，以及 Access Administration 的 strict JSON、一次性 Token、issue → verify → revoke、401/403/503、Grant 显式重新授予与 restart 不自动补回。
+1. `make test-integration` 验证 fresh/idempotent migration、逐版升级、Record/Registry/Draft/Release 事实，以及 P0-01a/P0-01b 的 Scope/Credential/Grant、marker/digest、终态、last-owner、事务审计与 append-only 约束；Release 另验证 Draft stale 后的原 Key/Plan alias、冲突优先级、并发、首次发布 stale、事务回滚和权限边界。
+2. `make test-server-smoke` 验证 Artifact、CRUD、Registry、Draft → Validate → Plan → Publish 真实 HTTP 旅程，以及 Access Administration 的 strict JSON、一次性 Token、轮换、授权与重启；Release 覆盖转义字段拒绝、Draft stale 后重放与重启后 POST 重放，且 Publish 前后及重启后的 OpenAPI、ETag 与 Record 字节必须不变。
 
 该 Job 同时设置 `PANVARA_TEST_DATABASE_URL` 与 `PANVARA_REQUIRE_DOCKER=1`；数据库不可用或版本不是 18.4 时必须失败，不能 Skip。Go 1.25.12 兼容 Job 只运行 vet、无 tag 的 unit 和 build，设置 `GOTOOLCHAIN=local`，不需要 Docker。
 
@@ -117,11 +117,16 @@ OpenAPI breaking check、`govulncheck` 和供应链扫描仍需在 RC 前补齐�
 - Replace 验证数字 ETag、缺失/畸形/过期前置条件、原子 CAS，以及相同 Source no-op 不增加 generation。
 - Validation 验证 invalid 是 2xx 领域结果、issues 稳定排序、valid Candidate 可复现、并发覆盖不能落下错误代次事实。
 - Plan 验证变化顺序与 Hash 稳定、Validation 绑定、风险分类、重放幂等，以及 Candidate 未登记、OpenAPI/Record/Runtime 不变。
+- Publish 先在短事务内二次授权并解析已绑定 Key/已发布 Plan；只有未命中的首次发布才验证精确 Plan 查找、当前 Draft/Validation/Plan 链、Source 重编译与 Candidate identity/Canonical IR；stale 与 unsupported 不产生发布写入。
+- PostgreSQL Publish 在 Project advisory lock 下事务内二次授权，并原子登记 Revision、Module Release、专用 Idempotency Binding 与成功安全审计；失败不留下半状态。
+- Draft 已变化后，同 Key/同意图、同 Plan/新 Key、重启后 POST 重放均返回原 Release；同 Key/异意图在 Plan 查找前冲突；Release、Key Binding 的 UPDATE/DELETE/TRUNCATE 被拒绝。
+- Release HTTP 严格拒绝未知/重复/大小写别名/Unicode 混淆/`\u` 转义字段名、多个 Key、query 与多余 Body；首次 201 + Location，重放/Detail 200，全部 `private, no-store`。
+- Publish 后 Candidate 可读，但 OpenAPI 当前 Revision、业务 Record 字节与 ETag 在发布前后和多次重启后保持不变。
 - Lite 不依赖外部服务可启动；Server 缺少数据库、模块或 Project ID 时 fail-fast；marker 尚未创建且缺 Token 时 fail-fast，marker 存在后可省略 Token。
 
 以上 P0-01a/P0-01b 用例只证明 project-local Service Principal/API Credential、默认 Environment 与固定 `project.owner` Grant 的可运行闭环。当前没有 Account、ExternalIdentity、Session、ProjectMembership、动态 Role/Policy、RecordOwner 或身份 Provider，也没有给 Record、Revision、Draft 数据补齐真正的 Environment 事实；这些缺口不能被现有通过项解释为完整 P0-01 或多 Environment 隔离。
 
-以下能力仍是后续 alpha.3 的测试目标，不是 alpha.3b 已通过项：Publish 事务、Outbox、Activate/Rollback、通用业务 Idempotency Key、副作用、Provider 错误分类、Revision epoch、数据迁移执行和 N-1 Schema 激活升级。alpha.3b 的 Idempotency Key 只覆盖 Create Draft。
+以下能力仍是后续测试目标，不是 P0-02a 已通过项：Outbox、Activate/Rollback、通用业务 Idempotency Key、副作用、Provider 错误分类、Revision epoch、数据迁移执行和 N-1 Schema 激活升级。当前 Idempotency Key 只覆盖 Create Draft 与 Release Publish 的专用事实。
 
 Webhook 签名与重放测试在第一个 callback 型 Provider Capability 进入范围时成为强制门禁；Console/SMTP Email 阶段不伪造这一覆盖。
 

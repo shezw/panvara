@@ -111,6 +111,37 @@ type integrationPlan struct {
 	} `json:"effects"`
 }
 
+type integrationRelease struct {
+	ReleaseID          string  `json:"release_id"`
+	Module             string  `json:"module"`
+	DraftID            string  `json:"draft_id"`
+	DraftGeneration    uint64  `json:"draft_generation"`
+	ValidationID       string  `json:"validation_id"`
+	PlanID             string  `json:"plan_id"`
+	PlanHash           string  `json:"plan_hash"`
+	BaselineRevision   *string `json:"baseline_revision"`
+	CandidateRevision  string  `json:"candidate_revision"`
+	DataSchemaIdentity struct {
+		Format      int    `json:"format"`
+		Fingerprint string `json:"fingerprint"`
+	} `json:"data_schema_identity"`
+	SourceHash            string    `json:"source_hash"`
+	Outcome               string    `json:"outcome"`
+	Risk                  string    `json:"risk"`
+	PublishedBy           string    `json:"published_by"`
+	PublishedCredentialID string    `json:"published_credential_id"`
+	RequestID             string    `json:"request_id"`
+	PublishedAt           time.Time `json:"published_at"`
+	Effects               struct {
+		RevisionRegistered  bool `json:"revision_registered"`
+		Published           bool `json:"published"`
+		Activated           bool `json:"activated"`
+		RecordsMigrated     bool `json:"records_migrated"`
+		RuntimeChanged      bool `json:"runtime_changed"`
+		ActivationSupported bool `json:"activation_supported"`
+	} `json:"effects"`
+}
+
 type integrationAccessPrincipal struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
@@ -477,6 +508,155 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	if patchResponse.Header.Get("ETag") != `"2"` {
 		t.Fatalf("PATCH ETag = %q", patchResponse.Header.Get("ETag"))
 	}
+	prePublishRecord := assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	prePublishArtifact := assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/core/v1alpha1/modules/crm.leads/openapi.json",
+		"", "", "", http.StatusOK, nil,
+	)
+	releaseCollectionPath := "/api/admin/core/v1alpha1/modules/crm.leads/releases"
+	releaseBody := fmt.Sprintf(`{"plan_id":%q}`, equivalentPlan.PlanID)
+	createdReleaseResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+releaseCollectionPath,
+		testIntegrationAdminToken, releaseBody, "", http.StatusCreated,
+		http.Header{"Idempotency-Key": []string{"server-e2e-publish"}},
+	)
+	if createdReleaseResponse.Header.Get("Cache-Control") != "private, no-store" ||
+		createdReleaseResponse.Header.Get("Location") == "" {
+		t.Fatalf("created Release headers = %#v", createdReleaseResponse.Header)
+	}
+	var publishedRelease integrationRelease
+	if err := json.Unmarshal(createdReleaseResponse.Body, &publishedRelease); err != nil {
+		t.Fatal(err)
+	}
+	if publishedRelease.ReleaseID == "" || publishedRelease.Module != "crm.leads" ||
+		publishedRelease.DraftID != equivalentDraft.DraftID ||
+		publishedRelease.DraftGeneration != equivalentDraft.DraftVersion ||
+		publishedRelease.ValidationID != equivalentValidation.ValidationID ||
+		publishedRelease.PlanID != equivalentPlan.PlanID || publishedRelease.PlanHash != equivalentPlan.PlanHash ||
+		publishedRelease.BaselineRevision == nil || *publishedRelease.BaselineRevision != runtimeRevision ||
+		equivalentValidation.CandidateRevision == nil ||
+		publishedRelease.CandidateRevision != *equivalentValidation.CandidateRevision ||
+		publishedRelease.DataSchemaIdentity.Format <= 0 || publishedRelease.DataSchemaIdentity.Fingerprint == "" ||
+		publishedRelease.SourceHash != equivalentDraft.SourceHash || publishedRelease.Outcome == "" ||
+		publishedRelease.Risk == "" || publishedRelease.PublishedBy != "bootstrap-admin" ||
+		publishedRelease.PublishedCredentialID == "" || publishedRelease.RequestID == "" ||
+		publishedRelease.PublishedAt.IsZero() || !publishedRelease.Effects.RevisionRegistered ||
+		!publishedRelease.Effects.Published || publishedRelease.Effects.Activated ||
+		publishedRelease.Effects.RecordsMigrated || publishedRelease.Effects.RuntimeChanged ||
+		publishedRelease.Effects.ActivationSupported {
+		t.Fatalf("published Release = %#v", publishedRelease)
+	}
+	releasePath := createdReleaseResponse.Header.Get("Location")
+	for _, key := range []string{"server-e2e-publish", "server-e2e-publish-new-key"} {
+		replayed := assertIntegrationStatus(
+			t, client, http.MethodPost, baseURL+releaseCollectionPath,
+			testIntegrationAdminToken, releaseBody, "", http.StatusOK,
+			http.Header{"Idempotency-Key": []string{key}},
+		)
+		var replayedRelease integrationRelease
+		if err := json.Unmarshal(replayed.Body, &replayedRelease); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(replayedRelease, publishedRelease) || replayed.Header.Get("Location") != releasePath {
+			t.Fatalf("Release replay with key %q = %#v, want %#v", key, replayedRelease, publishedRelease)
+		}
+	}
+	staleDraftSource := append([]byte("# post-publish Draft change\n"), equivalentSource...)
+	staleDraftResponse := assertIntegrationStatus(
+		t, client, http.MethodPut, baseURL+draftItemPath+"/source",
+		testIntegrationAdminToken, string(staleDraftSource), `"3"`, http.StatusOK,
+		http.Header{"Content-Type": []string{"application/yaml"}},
+	)
+	var staleDraft integrationDraft
+	if err := json.Unmarshal(staleDraftResponse.Body, &staleDraft); err != nil {
+		t.Fatal(err)
+	}
+	if staleDraft.DraftVersion != 4 || staleDraft.SourceHash == equivalentDraft.SourceHash ||
+		staleDraftResponse.Header.Get("ETag") != `"4"` {
+		t.Fatalf("post-publish Draft replacement = %#v headers=%#v", staleDraft, staleDraftResponse.Header)
+	}
+	for _, key := range []string{"server-e2e-publish", "server-e2e-publish-stale-alias"} {
+		replayed := assertIntegrationStatus(
+			t, client, http.MethodPost, baseURL+releaseCollectionPath,
+			testIntegrationAdminToken, releaseBody, "", http.StatusOK,
+			http.Header{"Idempotency-Key": []string{key}},
+		)
+		var replayedRelease integrationRelease
+		if err := json.Unmarshal(replayed.Body, &replayedRelease); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(replayedRelease, publishedRelease) || replayed.Header.Get("Location") != releasePath {
+			t.Fatalf("stale Plan replay with key %q = %#v, want %#v", key, replayedRelease, publishedRelease)
+		}
+	}
+	conflictingReleaseBody := fmt.Sprintf(
+		`{"plan_id":%q}`,
+		"sha256:"+strings.Repeat("0", 64),
+	)
+	conflictResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+releaseCollectionPath,
+		testIntegrationAdminToken, conflictingReleaseBody, "", http.StatusConflict,
+		http.Header{"Idempotency-Key": []string{"server-e2e-publish"}},
+	)
+	if !bytes.Contains(conflictResponse.Body, []byte(`"code":"idempotency_key_conflict"`)) {
+		t.Fatalf("bound-key conflict body = %s", conflictResponse.Body)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+releaseCollectionPath,
+		testIntegrationAdminToken,
+		`{"\u0070lan_id":"`+equivalentPlan.PlanID+`"}`,
+		"", http.StatusBadRequest,
+		http.Header{"Idempotency-Key": []string{"server-e2e-escaped-release-key"}},
+	)
+	gotReleaseResponse := assertIntegrationStatus(
+		t, client, http.MethodGet, baseURL+releasePath,
+		testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	var gotRelease integrationRelease
+	if err := json.Unmarshal(gotReleaseResponse.Body, &gotRelease); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotRelease, publishedRelease) {
+		t.Fatalf("GET Release = %#v, want %#v", gotRelease, publishedRelease)
+	}
+	publishedRegistry := assertIntegrationRevisionRegistry(
+		t, client, baseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 2,
+	)
+	if publishedRegistry.Metadata.RegisteredAt != initialRegistry.Metadata.RegisteredAt ||
+		publishedRegistry.Metadata.SourceHash != initialRegistry.Metadata.SourceHash {
+		t.Fatal("Publish replaced the bootstrap Revision fact")
+	}
+	publishedRevisionResponse := assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/admin/core/v1alpha1/modules/crm.leads/revisions/"+
+			url.PathEscape(publishedRelease.CandidateRevision),
+		testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	var publishedRevision integrationRevision
+	if err := json.Unmarshal(publishedRevisionResponse.Body, &publishedRevision); err != nil {
+		t.Fatal(err)
+	}
+	if publishedRevision.Origin != "publish" || publishedRevision.RegisteredBy != "bootstrap-admin" ||
+		publishedRevision.SourceHash != equivalentDraft.SourceHash {
+		t.Fatalf("published Revision metadata = %#v", publishedRevision)
+	}
+	postPublishArtifact := assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/core/v1alpha1/modules/crm.leads/openapi.json",
+		"", "", "", http.StatusOK, nil,
+	)
+	postPublishRecord := assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	if !bytes.Equal(postPublishArtifact.Body, prePublishArtifact.Body) ||
+		postPublishArtifact.Header.Get("ETag") != prePublishArtifact.Header.Get("ETag") ||
+		!bytes.Equal(postPublishRecord.Body, prePublishRecord.Body) ||
+		postPublishRecord.Header.Get("ETag") != prePublishRecord.Header.Get("ETag") {
+		t.Fatal("Publish changed active OpenAPI or the existing Record")
+	}
 
 	servicePrincipal := createIntegrationServicePrincipal(
 		t, client, baseURL, testIntegrationAdminToken, "Server smoke worker",
@@ -587,6 +767,43 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		if got := decodeIntegrationRecord(t, restarted.Body).Data["stage"]; got != "qualified" {
 			t.Fatalf("stage after restart %d = %#v", restart, got)
 		}
+		if !bytes.Equal(restarted.Body, prePublishRecord.Body) ||
+			restarted.Header.Get("ETag") != prePublishRecord.Header.Get("ETag") {
+			t.Fatalf("Record changed after release restart %d", restart)
+		}
+		restartedArtifact := assertIntegrationStatus(
+			t, client, http.MethodGet,
+			baseURL+"/api/core/v1alpha1/modules/crm.leads/openapi.json",
+			"", "", "", http.StatusOK, nil,
+		)
+		if !bytes.Equal(restartedArtifact.Body, prePublishArtifact.Body) ||
+			restartedArtifact.Header.Get("ETag") != prePublishArtifact.Header.Get("ETag") {
+			t.Fatalf("active OpenAPI changed after release restart %d", restart)
+		}
+		restartedReleaseResponse := assertIntegrationStatus(
+			t, client, http.MethodGet, baseURL+releasePath,
+			testIntegrationAdminToken, "", "", http.StatusOK, nil,
+		)
+		var restartedRelease integrationRelease
+		if err := json.Unmarshal(restartedReleaseResponse.Body, &restartedRelease); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(restartedRelease, publishedRelease) {
+			t.Fatalf("Release changed after restart %d: got %#v want %#v", restart, restartedRelease, publishedRelease)
+		}
+		restartedReplayResponse := assertIntegrationStatus(
+			t, client, http.MethodPost, baseURL+releaseCollectionPath,
+			testIntegrationAdminToken, releaseBody, "", http.StatusOK,
+			http.Header{"Idempotency-Key": []string{"server-e2e-publish"}},
+		)
+		var restartedReplay integrationRelease
+		if err := json.Unmarshal(restartedReplayResponse.Body, &restartedReplay); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(restartedReplay, publishedRelease) ||
+			restartedReplayResponse.Header.Get("Location") != releasePath {
+			t.Fatalf("Release replay changed after restart %d: got %#v want %#v", restart, restartedReplay, publishedRelease)
+		}
 		if restart == 1 {
 			persistedDraft := assertIntegrationStatus(
 				t, client, http.MethodGet, baseURL+draftItemPath,
@@ -596,8 +813,8 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 			if err := json.Unmarshal(persistedDraft.Body, &draftAfterRestart); err != nil {
 				t.Fatal(err)
 			}
-			if draftAfterRestart.DraftVersion != 3 || draftAfterRestart.SourceHash != equivalentDraft.SourceHash {
-				t.Fatalf("Draft after restart = %#v, want %#v", draftAfterRestart, equivalentDraft)
+			if draftAfterRestart.DraftVersion != 4 || draftAfterRestart.SourceHash != staleDraft.SourceHash {
+				t.Fatalf("Draft after restart = %#v, want %#v", draftAfterRestart, staleDraft)
 			}
 			assertIntegrationStatus(
 				t, client, http.MethodGet,
@@ -616,7 +833,7 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 			)
 		}
 		restartedRegistry := assertIntegrationRevisionRegistry(
-			t, client, baseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 1,
+			t, client, baseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 2,
 		)
 		if restartedRegistry.Metadata.RegisteredAt != initialRegistry.Metadata.RegisteredAt ||
 			restartedRegistry.Metadata.SourceHash != initialRegistry.Metadata.SourceHash ||
@@ -649,7 +866,7 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	changedConfig.moduleSource = changedPath
 	changedApplication, changedServer, changedBaseURL := startIntegrationServer(t, ctx, changedConfig)
 	changedRegistry := assertIntegrationRevisionRegistry(
-		t, client, changedBaseURL, testIntegrationAdminToken, "crm.leads", changedApplication.revision, 2,
+		t, client, changedBaseURL, testIntegrationAdminToken, "crm.leads", changedApplication.revision, 3,
 	)
 	if integrationDataSchemaFingerprint(changedRegistry.Metadata, 1) != integrationDataSchemaFingerprint(initialRegistry.Metadata, 1) {
 		t.Fatal("semantic version-only revision changed DataSchemaFingerprint")
@@ -687,7 +904,7 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		t.Fatalf("stage after returning to original revision = %#v", got)
 	}
 	returnedRegistry := assertIntegrationRevisionRegistry(
-		t, client, baseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 2,
+		t, client, baseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 3,
 	)
 	if returnedRegistry.Metadata.RegisteredAt != initialRegistry.Metadata.RegisteredAt ||
 		returnedRegistry.Metadata.SourceHash != initialRegistry.Metadata.SourceHash {

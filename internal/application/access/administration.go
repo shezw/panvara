@@ -83,8 +83,32 @@ type MutationContext struct {
 	operation  Operation
 }
 
+// NewMutationContext safely binds credential-backed invocation evidence to one
+// explicit mutation operation. Callers must select the operation in their use
+// case implementation rather than accepting it from a transport request.
+func NewMutationContext(invocation Invocation, operation Operation) (MutationContext, error) {
+	if err := invocation.Validate(); err != nil {
+		return MutationContext{}, err
+	}
+	if invocation.Execution().Surface() != SurfaceAdmin || !mutationOperation(operation) {
+		return MutationContext{}, fmt.Errorf("%w: invalid mutation operation %q", ErrInvalid, operation)
+	}
+	return MutationContext{invocation: invocation, operation: operation}, nil
+}
+
 func newMutationContext(invocation Invocation, operation Operation) MutationContext {
 	return MutationContext{invocation: invocation, operation: operation}
+}
+
+// Validate rejects incomplete or read-only repository mutation instructions.
+func (mutation MutationContext) Validate() error {
+	if err := mutation.invocation.Validate(); err != nil {
+		return err
+	}
+	if mutation.invocation.Execution().Surface() != SurfaceAdmin || !mutationOperation(mutation.operation) {
+		return fmt.Errorf("%w: invalid mutation operation %q", ErrInvalid, mutation.operation)
+	}
+	return nil
 }
 
 // Scope returns the exact project/environment mutation boundary.
@@ -107,6 +131,21 @@ func (mutation MutationContext) Operation() Operation { return mutation.operatio
 
 // RequestID returns the transport correlation ID written to the audit event.
 func (mutation MutationContext) RequestID() string { return mutation.invocation.RequestID() }
+
+func mutationOperation(operation Operation) bool {
+	switch operation {
+	case OperationReleasePublish,
+		OperationPrincipalCreate,
+		OperationPrincipalDisable,
+		OperationCredentialIssue,
+		OperationCredentialRevoke,
+		OperationProjectOwnerGrant,
+		OperationProjectOwnerRevoke:
+		return true
+	default:
+		return false
+	}
+}
 
 // CreatePrincipalInput contains operator input for a service principal.
 type CreatePrincipalInput struct {

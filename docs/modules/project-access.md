@@ -39,7 +39,7 @@ flowchart LR
 - 某个 `PANVARA_PROJECT_ID` 首次启动时，在一个事务中创建 Project、一个默认 Environment、`bootstrap-admin` Principal 和精确作用域内的 `project.owner` Grant。
 - 默认 Environment 使用生成的 UUIDv7；相同配置重启时复用同一持久化身份。
 - 并发首次启动通过 Project 级事务锁收敛到同一组事实。
-- Record 的 5 个用例、Revision 的 3 个读取用例和 Draft 的 8 个用例在 Application 层固定操作名称并先授权，拒绝时不会访问业务 Store。
+- Record 的 5 个用例、Revision 的 3 个读取用例、Draft 的 8 个用例和 Release Publish/Get 2 个用例在 Application 层固定操作名称并先授权，拒绝时不会访问业务 Store。
 - Public Surface 只可进入 Record 用例，并继续接受 AppModule 的逐资源、逐操作策略检查；Admin Surface 必须有未撤销的持久化 Owner Grant。
 - Project、默认 Environment、Principal 或 Grant 状态变化会立即影响后续请求；撤销 Grant 后重启不会偷偷恢复权限。
 - 未识别操作、非默认 Environment、跨 Project Actor、数据库授权状态读取失败均 fail closed。
@@ -144,7 +144,7 @@ Bearer 只证明请求对应一个 project-local Principal。Project、默认 En
 
 ### 为什么 Public Create 不要求 Owner Grant？
 
-Public 是业务表面，不是管理表面。Access Kernel 只允许它进入 Record 用例，随后 AppModule 仍会检查该 Resource 是否显式开放对应操作。Revision 与 Draft 永远不能从 Public Surface 访问。
+Public 是业务表面，不是管理表面。Access Kernel 只允许它进入 Record 用例，随后 AppModule 仍会检查该 Resource 是否显式开放对应操作。Revision、Draft 与 Release 永远不能从 Public Surface 访问。
 
 ### Environment 已持久化，为什么还不能用多个环境？
 
@@ -156,7 +156,7 @@ Public 是业务表面，不是管理表面。Access Kernel 只允许它进入 R
 - 已有业务事实仍按 Project 隔离，尚未按 Environment 隔离。
 - 只有 bootstrap/Service Principal、API Credential 和固定 `project.owner` Role，没有 Account、ExternalIdentity、Session、ProjectMembership、动态 Role/Policy 或 RecordOwner。
 - Credential 支持一次性签发、显式轮换与 revoke，但没有到期、MFA、密码或 Google/Apple/Facebook/微信登录。
-- Release、Migration 和 Provider 用例尚未实现，因此也未接入 Access Kernel。
+- Release Publish/Get 已接入 Access Kernel；Activate/Rollback、Migration 和 Provider 用例尚未实现，因此也未接入。
 - 每次授权读取 PostgreSQL；缓存、失效协议和高并发压测将在真实瓶颈出现后设计。
 - Grant 管理只支持固定 `project.owner`，没有动态角色、列表分页或生产级恢复工作流。
 

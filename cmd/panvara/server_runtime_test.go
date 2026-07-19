@@ -78,3 +78,12 @@ func TestDocumentedExampleModuleCompiles(t *testing.T) {
 		t.Fatalf("documented example compiled as %q revision %q", module.Name(), module.RevisionHash())
 	}
 }
+
+func TestReleasePublisherCompositionFailsClosedWithoutDependencies(t *testing.T) {
+	t.Parallel()
+
+	publisher, err := composeReleasePublisher(nil, nil, nil)
+	if publisher != nil || err == nil || !strings.Contains(err.Error(), "release publisher") {
+		t.Fatalf("composeReleasePublisher(nil) = %#v, %v", publisher, err)
+	}
+}

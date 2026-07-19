@@ -217,6 +217,31 @@ Plan 使用 JSON Body 引用当前 Draft Version 中有效 Validation：
 
 所有 Draft 元数据、Validation、Plan 和 Draft Source 使用 `Cache-Control: private, no-store`。完整命令、Token 安全与冲突恢复见 [Draft → Validate → Plan 完整验收](../getting-started/draft-plan-acceptance.md)。
 
+### Module Release Publish 与 Detail
+
+Publish 接受一个已持久化 `plan_id`，并要求发布专用 Idempotency Key：
+
+```sh
+curl -X POST \
+  http://127.0.0.1:8080/api/admin/core/v1alpha1/modules/crm.leads/releases \
+  -H "Authorization: Bearer $PANVARA_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: publish-client-request-001' \
+  --data '{"plan_id":"sha256:..."}'
+```
+
+首次 Publish 返回 201 与 `Location`；同 Key/同 Plan 或同 Plan/新 Key 返回 200 和同一 Release，即使 Draft 后来已使 Plan stale。相同 Key 对应不同意图会在 Plan 查找前返回 409。请求不接受查询参数，Body 只接受原始字节中精确 ASCII `plan_id` 字段，`\u` 转义的字段名也会被拒绝。
+
+Detail 使用：
+
+```sh
+curl -fsS \
+  http://127.0.0.1:8080/api/admin/core/v1alpha1/modules/crm.leads/releases/019f... \
+  -H "Authorization: Bearer $PANVARA_ADMIN_TOKEN"
+```
+
+Publish 先在短事务中二次授权并解析已绑定 Key 或已发布 Plan；未命中时才重新核对当前 Draft generation、有效 Validation、非 stale Plan，并复编译精确 Source。首次成功后 Candidate Revision 与 Module Release 在同一数据库事务写入。响应必须同时返回 `published=true`、`activated=false`、`records_migrated=false`、`runtime_changed=false` 与 `activation_supported=false`。所有 Release 响应使用 `Cache-Control: private, no-store`。完整验收见 [Draft → Publish 完整验收](../getting-started/draft-publish-acceptance.md)。
+
 ## 验收
 
 1. Lite 的三个运维端点分别返回 200。
@@ -233,6 +258,8 @@ Plan 使用 JSON Body 引用当前 Draft Version 中有效 Validation：
 12. Draft Create 首次 201、同请求重放 200；同 Source Replace 不增加 `draft_version`，旧 ETag 返回 412。
 13. 无效 Validation 返回 2xx + `valid=false`；有效 Validation 与 Plan 重放保持同一 ID/Hash。
 14. Plan 后 OpenAPI Revision、Registry Candidate 与业务 Record 均不改变，全部执行 effects 为 false。
+15. Publish 首次返回 201；Draft stale 与进程重启后，同 Key 或同 Plan 新 Key 重放仍返回 200 和同一 Release；同 Key/异 Plan 优先返回 409。
+16. Publish 后 Candidate 可从 Registry 读取，但 OpenAPI Revision 与 Record 在发布前后及重启后保持不变。
 
 ## 常见问题
 
@@ -266,21 +293,25 @@ Validation 请求成功，作者 Source 没有通过。读取 `violations` 修�
 
 ### Plan 的 `compatible` 表示可以激活吗？
 
-不表示。Plan 只解释结构变化；当前 Record namespace 仍按完整 Module Revision 隔离，而且 alpha.3b 不提供 Publish、Activate 或迁移执行。
+不表示。Plan 只解释结构变化。P0-02a 可以把它发布成不可变事实，但 `activation_supported=false`；当前 Record namespace 仍按完整 Module Revision 隔离，也没有 Activate 或迁移执行。
+
+### `published=true` 表示线上已经切换吗？
+
+不表示。请读取同一响应的 `activated=false` 与 `runtime_changed=false`。当前运行 Revision 仍以 OpenAPI 顶层 `x-panvara-revision` 为准。
 
 ## 当前限制
 
 - 路径仍是 `v1alpha1` 实验契约；Public 仅支持 Create。
 - Admin 支持 bootstrap/Service Principal Credential，但不是 Account/Session 身份体系。
-- 没有 CORS 配置、内置 TLS、限流或 Webhook；Idempotency Key 当前仅覆盖 Create Draft，不是通用 HTTP 中间件。
+- 没有 CORS 配置、内置 TLS、限流或 Webhook；Idempotency Key 当前只覆盖 Create Draft 与 Module Release Publish 的专用事实，不是通用 HTTP 中间件。
 - 没有 gRPC、GraphQL、批量 API 或流式响应。
 - Record Body 最大 256 KiB；Draft Source 最大 1 MiB；请求 Header 最大 1 MiB。
 - 写超时 30 秒，不适合长任务。
-- Registry 只有 owner 只读 API，没有 cursor、写入 API、活动指针或发布状态。
-- Draft Planning 没有 List/Delete/Rebase、Publish/Activate/Rollback、数据迁移或活动指针。
+- Registry 只有 owner 只读 API，没有 cursor、通用写入 API 或活动指针；Candidate 只由 Publish 用例登记。
+- Draft Planning 没有 List/Delete/Rebase；P0-02a 只有 Publish/Detail，没有 Activate/Rollback、数据迁移或活动指针。
 
 ## 兼容与升级
 
-客户端应以当前模块生成的 OpenAPI 为准。完整 Canonical IR 改变后，生成物 ETag 与 `x-panvara-revision` 会变化，Record API 也会访问新 Revision 的独立数据 Scope。Registry 中同一 format 的 fingerprint 相同不会自动迁移或激活数据；客户端不能依赖 `data_schema_identities[0]`。Draft Version、Validation Format 与 Plan Format 也是独立轴，不能只按时间选择“最新结果”。
+客户端应以当前模块生成的 OpenAPI 为准。完整 Canonical IR 改变后，生成物 ETag 与 `x-panvara-revision` 会变化，Record API 也会访问新 Revision 的独立数据 Scope。Registry 中同一 format 的 fingerprint 相同或存在 Published Release 都不会自动迁移或激活数据；客户端不能依赖 `data_schema_identities[0]`。Draft Version、Validation Format、Plan Format 与 Release ID 是独立轴，不能只按时间选择“最新结果”。
 
 正式版本前不承诺 v1alpha1 长期兼容；破坏性变更必须同时更新本指南、生成契约和验收测试。

@@ -36,7 +36,7 @@ Draft Planning 为人或模型提供一个短反馈环：先把仍可能有错�
 
 alpha.3b 实现项目 owner 作用域内的 Draft 创建、读取与原始 Source 覆盖，持久化、可重放的 Validation 和 Plan，以及 ETag 并发保护和创建 Idempotency Key。Draft 可以保存空白、语法错误、未知字段或领域规则不完整的 UTF-8 Source，Validation 才负责给出结构化问题；原始 Source 不能包含 NUL（U+0000）。
 
-当前没有 Draft List/Delete/Rebase，没有 Publish、Activate、Rollback、数据迁移、active pointer/epoch、Outbox、Worker、运行时热切换或多节点收敛。
+当前没有 Draft List/Delete/Rebase。Draft/Validation/Plan 接口本身不会 Publish；P0-02a 另提供显式 [Module Release 发布事实](release-publishing.md)，但仍没有 Activate、Rollback、数据迁移、active pointer/epoch、Outbox、Worker、运行时热切换或多节点收敛。
 
 ## 前置条件
 
@@ -269,9 +269,9 @@ bootstrap Token 具有当前项目 owner 权限。不要把它放在 URL、查�
 
 Draft 是工作副本，不是可运行 Revision。保存只检查 Content-Type、NUL-free UTF-8 和 1 MiB 上限；作者错误由 Validation 转换成可定位 violations。
 
-### `valid=true` 是否表示可以发布？
+### `valid=true` 是否表示可以直接发布？
 
-不是。它只说明这一代 Source 可以确定性编译。Candidate 没有进入 Registry，也没有发布、激活或迁移数据。
+不是。它只说明这一代 Source 可以确定性编译。还必须为同一代 Validation 生成当前、非 stale 的 Plan，再显式调用 P0-02a Publish。即使 Publish 成功，也只会登记 Candidate 与 Release，不会激活或迁移数据。
 
 ### 怎样判断当前运行 Revision？
 
@@ -296,12 +296,12 @@ Draft 是工作副本，不是可运行 Revision。保存只检查 Content-Type�
 - Draft Source 最多 1 MiB；没有 List、Delete、Rebase、配额或保留清理策略。
 - Plan Format 1 不启发式识别 rename，也不执行或排队迁移。
 - Candidate 不进入 Registry，不能被 Record Runtime 使用。
-- 没有 Publish、Activate、Rollback、active pointer/epoch、Outbox、Worker、热切换或多节点收敛。
+- Draft Workflow 没有自动 Publish；P0-02a 只有独立显式 Publish Facts，没有 Activate、Rollback、active pointer/epoch、Outbox、Worker、热切换或多节点收敛。
 
 ## 兼容与升级
 
 Draft、Validation 和 Plan 分别携带 Draft Version、Source Hash、Validation/Plan Format 与 Candidate 身份；客户端不能只凭 Distribution 版本或时间戳判断它们可重放。格式算法变化必须新增 format version，不能重解释旧 Hash。
 
-alpha.3b 不改变当前 Record namespace，也不修改 alpha.3a Registry 的不可变约束。未来 Publish/Activate 只能引用这里产生的不可变事实，并另行完成迁移、审计、原子切换与回滚协议；它不能把现有 Plan 重新解释为已经执行。
+alpha.3b 不改变当前 Record namespace，也不修改 alpha.3a Registry 的不可变约束。P0-02a Publish 只能引用这里产生的不可变事实，并把 Candidate 与 Release 追加到权威存储；它不能把现有 Plan 重新解释为已激活或已迁移。未来 Activate/Migration 仍需独立完成原子切换、恢复与回滚协议。
 
 架构决策见 [ADR-0003](../adr/0003-draft-validation-change-plan.md)。

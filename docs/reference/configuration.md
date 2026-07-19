@@ -74,11 +74,13 @@ Panvara 使用的 PostgreSQL 18.4 数据库必须采用 UTF8 `server_encoding`�
 
 alpha.3a Registry 开发切片不增加配置项。Server 在 migration 与 P0-01a 作用域初始化之后、对外就绪之前，使用当前持久化 Project、`PANVARA_MODULE_SOURCE` 和 `PANVARA_MODULE_FORMAT` 进行幂等 bootstrap 登记；失败会阻止启动。
 
-任一 active project-local Credential 都可认证 Registry 读取，以及 alpha.3b Draft、Validation 与 Plan 控制面；这些 Admin 用例仍由持久化 Owner Grant 授权。当前没有 active Revision、Publish、Activate 或 Rollback 配置，也不能用 Registry List 顺序配置运行版本。
+任一 active project-local Credential 都可认证 Registry、Draft/Validation/Plan 与 P0-02a Release 控制面；这些 Admin 用例仍由持久化 Owner Grant 授权。当前没有 active Revision、Activate 或 Rollback 配置，也不能用 Registry List 或 Release 时间配置运行版本。
 
 `data_schema_identities` 也不是配置项。它是 Panvara 为不可变父 Revision 计算并按 format 升序返回的派生身份数组；新增算法只能追加新的 format，用户不能通过环境变量覆盖 fingerprint。
 
 alpha.3b 不增加环境变量。Draft Baseline 必须由每个 Create 请求显式传入；Draft Version（内部 generation）、Source Hash、Validation/Plan Format 和 Idempotency Key 都是请求或持久化身份，不能用环境变量全局覆盖。Draft/Plan 不会取代 `PANVARA_MODULE_SOURCE`：Server 仍从启动配置读取当前运行模块。
+
+P0-02a Publish 同样不增加环境变量。`plan_id` 与 `Idempotency-Key` 必须随每个 POST 显式提交，Release ID 由 Server 生成并持久化。Publish 不会改写 `PANVARA_MODULE_SOURCE`、`PANVARA_MODULE_FORMAT` 或任何 Project 配置；重启后 Runtime 仍由同一启动 Source 决定。使用与验收见[发布事实指南](../modules/release-publishing.md)。
 
 ## 测试变量
 

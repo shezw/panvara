@@ -28,9 +28,11 @@ const requiredPages = [
   "docs/getting-started/crm-leads-acceptance.md",
   "docs/getting-started/revision-registry-acceptance.md",
   "docs/getting-started/draft-plan-acceptance.md",
+  "docs/getting-started/draft-publish-acceptance.md",
   "docs/getting-started/troubleshooting.md",
   "docs/development.md",
   "docs/architecture-review-server-current.md",
+  "docs/architecture-review-release-publish.md",
   "docs/roadmap/server-core.md",
   "docs/roadmap/manager.md",
   "docs/reference/commands.md",
@@ -42,7 +44,9 @@ const requiredPages = [
   "docs/adr/0003-draft-validation-change-plan.md",
   "docs/adr/0004-persistent-execution-scope-access-kernel.md",
   "docs/adr/0005-project-local-access-administration.md",
+  "docs/adr/0006-immutable-module-release-publish-facts.md",
   "docs/modules/access-administration.md",
+  "docs/modules/release-publishing.md",
 ];
 
 const moduleHeadings = [
@@ -208,6 +212,25 @@ if (fs.existsSync(absolute(draftAcceptancePath))) {
   for (const fragment of retiredFragments) {
     if (acceptance.includes(fragment)) {
       failures.push(`Draft Golden Path 仍使用已废弃的 HTTP 字段: ${fragment}`);
+    }
+  }
+}
+
+const publishAcceptancePath = "docs/getting-started/draft-publish-acceptance.md";
+if (fs.existsSync(absolute(publishAcceptancePath))) {
+  const acceptance = fs.readFileSync(absolute(publishAcceptancePath), "utf8");
+  const requiredFragments = [
+    ".release_id", ".plan_id", ".candidate_revision",
+    ".data_schema_identity.format", ".published_credential_id",
+    ".effects.revision_registered == true", ".effects.published == true",
+    ".effects.activated == false", ".effects.records_migrated == false",
+    ".effects.runtime_changed == false", ".effects.activation_supported == false",
+    "Idempotency-Key", "Cache-Control: private, no-store",
+    "RUNTIME_BEFORE", "publish-records-before", "重启后再验证",
+  ];
+  for (const fragment of requiredFragments) {
+    if (!acceptance.includes(fragment)) {
+      failures.push(`Publish Golden Path 缺少实际 HTTP 契约片段: ${fragment}`);
     }
   }
 }

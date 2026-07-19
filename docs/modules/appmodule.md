@@ -32,8 +32,8 @@ alpha.2 已实现：
 
 当前 alpha.3a 开发切片还会生成 Data Schema Identity format 1，并在 Server 启动时把 Source、Canonical IR、OpenAPI 与 Manager UI Schema 登记为不可变父 Revision；数据结构身份作为可按 format 追加、不可覆盖的子事实保存。
 
-::: danger 登记不等于发布或激活
-Server 仍直接读取本地 Source 来决定当前 Runtime。Registry 没有模块上传、草稿、发布、激活、回滚或在线编辑界面，也不会改变 Record namespace。
+::: danger 登记或发布都不等于激活
+Server 仍直接读取本地 Source 来决定当前 Runtime。alpha.3b/P0-02a 已有 Draft/Plan 与显式 Publish API，但 Registry 本身没有通用上传、激活、回滚或在线编辑界面；Module Release 也不会改变 Record namespace 或 Runtime。
 :::
 
 ## 前置条件
@@ -224,4 +224,4 @@ alpha.2 升级模型时必须：
 4. 在独立数据库或可丢弃项目 ID 下验证新模型。
 5. 需要旧数据时继续使用完全相同的旧 Source/Hash。
 
-alpha.3a 只完成不可变 bootstrap 登记。Draft、Publish、Activate、Rollback 和数据迁移计划仍属于后续 alpha.3 工作。
+alpha.3a 本身只完成不可变 bootstrap 登记；当前分支随后以 alpha.3b 实现 Draft/Validation/Plan，并以 P0-02a 实现不可变 Publish Facts。Activate、Rollback 与数据迁移执行仍属于后续 alpha.3 工作。

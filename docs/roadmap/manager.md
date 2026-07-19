@@ -15,7 +15,7 @@
 # Manager 产品与工程验收路线图
 
 ::: warning 当前状态
-Panvara 当前没有可运行的 Manager Web 应用，`manager` Profile 仍是 planned。已经生成的 `manager.panvara.dev/v1alpha1` UI Schema 只是前端展示契约；Revision、Draft、Validation 和 Change Plan 是 Server 控制面用例，也不能计为 Manager UI 已完成。
+Panvara 当前没有可运行的 Manager Web 应用，`manager` Profile 仍是 planned。已经生成的 `manager.panvara.dev/v1alpha1` UI Schema 只是前端展示契约；Revision、Draft、Validation、Change Plan 与 P0-02a Module Release 都是 Server 控制面用例，也不能计为 Manager UI 已完成。
 :::
 
 ## 1. 产品定义
@@ -114,7 +114,7 @@ v0.1 默认单项目、单 Environment、单模块，界面不提前加入复杂
 | Record | Admin CRUD、过滤、cursor、ETag 和错误信封已实现 | 没有表格、表单、冲突恢复和浏览器验收 |
 | Revision | List、Detail、Source 只读 API 已实现 | 没有当前运行对照和 Revision 浏览界面 |
 | Draft | Create、Get、Replace、Validate、Plan 已实现 | 没有 Draft List、工作区、Source Diff 和 AI Proposal |
-| 生命周期 | 只有准备变化事实 | 没有 Publish、Activate、Rollback、迁移、active pointer 和审计 |
+| 生命周期 | 已有 P0-02a Publish/Get 不可变事实、专用幂等与最小成功安全审计 | 没有 Release List、Activate、Rollback、迁移、active pointer/epoch、通用 Audit/Outbox 和 Manager UI |
 | 身份 | bootstrap owner Token | 没有账号、会话、团队角色和字段权限管理 |
 | Provider | Capability 只进入声明 | 没有 Provider Runtime、Credential Reference 或连接管理 |
 
@@ -236,7 +236,7 @@ v0.1 默认单项目、单 Environment、单模块，界面不提前加入复杂
 - [ ] Accept 使用 Proposal 所绑定 Draft 的 If-Match；旧 Proposal 遇到新 Draft Version 时返回 412，不能覆盖。
 - [ ] Accept 恰好形成一个 Draft Version；随后必须调用 Server Validation，AI 自称“有效”没有产品语义。
 - [ ] 用户可明确要求 AI 根据 violations 产生另一个 Proposal，但修复不能自动写入或循环上线。
-- [ ] Publish/Activate 尚未实现时，界面没有可操作的发布或激活按钮。
+- [ ] M3 完整前，界面不能把 P0-02a Publish 暴露成“上线”按钮；即使以后提供发布操作，也必须同时显示 `activated=false` 与当前 Runtime Revision。
 
 ### M3：发布、迁移、激活与回滚
 
@@ -256,7 +256,7 @@ v0.1 默认单项目、单 Environment、单模块，界面不提前加入复杂
 
 #### Server 前置
 
-- Publish/Activate/Rollback 状态机、Rollback Eligibility、数据恢复策略与幂等契约。
+- P0-02a Publish/Get 已存在；仍需 Release List、Activate/Rollback 状态机、Rollback Eligibility、数据恢复策略、通用幂等、Audit/Outbox 与 active Snapshot/epoch。
 - active pointer；分布式阶段使用 ProjectReleaseSnapshot、单调 epoch 和 Module Hash Map。
 - 显式、幂等的数据迁移执行，保留 Record ID 并重建 unique/reference 约束。
 - operation/job 查询、last-known-good 和失败恢复。
@@ -264,7 +264,7 @@ v0.1 默认单项目、单 Environment、单模块，界面不提前加入复杂
 
 #### Acceptance
 
-- [ ] Publish 只接受当前 Draft Version 的有效 Validation 和对应 Plan；stale 输入被 Server 拒绝。
+- [ ] 首次 Publish 只接受当前 Draft Version 的有效 Validation 和对应 Plan；stale 的新意图被 Server 拒绝，已提交 Release 的幂等重放仍稳定返回原事实。
 - [ ] Publish 产生不可变 Revision，不覆盖 Draft、Registry 或历史 Source。
 - [ ] destructive/review 变化必须展示 Server blocker、迁移与备份要求，并进行额外人工确认。
 - [ ] 客户端确认不能绕过 Server 的拒绝条件。
@@ -430,7 +430,7 @@ Accept 不是 AI API 的副作用。Manager 读取 Proposal 的 proposed Source�
 | M0 | same-origin assets、capability manifest、Project/Environment/Actor/Role、Module Catalog、Context、版本握手 | 缺失 |
 | M1 | Admin CRUD、OpenAPI、UI Schema、ETag、错误信封、reference display/options | 前五项已有；Reference 可用性不足 |
 | M2 | Revision API、Draft List/Get/Source/Replace、Validation、Plan、Assistant Proposal | Revision 与大部分 Draft API 已有；List/Proposal 缺失 |
-| M3 | Publish、migration operation、Activate、Rollback、active state、last-known-good、Audit/Outbox | 缺失 |
+| M3 | Publish、migration operation、Activate、Rollback、active state、last-known-good、Audit/Outbox | P0-02a Publish/Get 窄切片已有；其余缺失，M3 不可启动验收 |
 | M4 | Account/Session/RBAC、Project Config Revision、Provider/Credential、Worker/Outbox 管理 | 缺失 |
 | M5 | Node/Release ACK/Rollout、Worker/Lease、Partition/Route、Extension Manifest | 条件阶段；Server Distributed 能力缺失 |
 

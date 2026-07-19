@@ -87,6 +87,7 @@ type Config struct {
 	Records              RecordService
 	Revisions            RevisionRegistryService
 	Drafts               DraftWorkflowService
+	Releases             ReleasePublisherService
 	AdminAuth            AdminAuth
 	AccessAdministration AccessAdministration
 }
@@ -100,6 +101,7 @@ type Handler struct {
 	records              RecordService
 	revisions            RevisionRegistryService
 	drafts               DraftWorkflowService
+	releases             ReleasePublisherService
 	accessAdministration AccessAdministration
 	resources            map[string]resourcePolicy
 	router               http.Handler
@@ -139,6 +141,7 @@ func New(config Config) (*Handler, error) {
 		project: config.Project, executionScope: config.Scope,
 		publicActor: config.PublicActor,
 		module:      config.Module, records: config.Records, revisions: config.Revisions, drafts: config.Drafts,
+		releases:             config.Releases,
 		accessAdministration: config.AccessAdministration,
 		resources:            makeResourcePolicies(config.Module.Descriptor()),
 	}
@@ -159,6 +162,9 @@ func New(config Config) (*Handler, error) {
 	}
 	if config.Drafts != nil {
 		handler.registerDraftRoutes(mux, config.AdminAuth)
+	}
+	if config.Releases != nil {
+		handler.registerReleaseRoutes(mux, config.AdminAuth)
 	}
 	handler.registerAccessRoutes(mux, config.AdminAuth)
 	mux.HandleFunc("/", handler.handleNotFound)

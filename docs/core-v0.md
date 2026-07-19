@@ -24,7 +24,7 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 - 单进程可以自然演进为 Server + Manager + Worker，而不重写领域规则。
 - 全球化原语从第一天进入模型，不等业务数据固化后再补。
 
-固定验证场景为 `crm-leads`。alpha.2 覆盖声明、编译、CRUD、Manager UI Schema 与 PostgreSQL；alpha.3a/3b 补充 Registry、Draft、Validation 与 Plan；P0-01a 补充持久化 Project/默认 Environment 与 Access Kernel；P0-01b 补充 project-local Service Principal/API Credential/Owner Grant 管理、首启 marker 和最小安全审计。受控邮件事件、完整身份/权限、真正多 Environment 事实与 Publish/Activate/Rollback 仍属于后续范围。Account 不作为动态 Resource。
+固定验证场景为 `crm-leads`。alpha.2 覆盖声明、编译、CRUD、Manager UI Schema 与 PostgreSQL；alpha.3a/3b 补充 Registry、Draft、Validation 与 Plan；P0-01a/P0-01b 补充默认 Environment、Access Kernel 与 project-local Credential/Grant 管理；P0-02a 补充不可变 Publish Facts。受控邮件事件、完整身份/权限、真正多 Environment 事实与 Activate/Rollback 仍属于后续范围。Account 不作为动态 Resource。
 
 ## 2. 版本路线
 
@@ -34,6 +34,7 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 | v0.1.0-alpha.2 | YAML/JSON 解码、v1alpha1 完整子集、Canonical IR、flex JSONB 存储、REST/OpenAPI、Manager UI Schema | crm-leads 可生成并完成持久化 CRUD |
 | alpha.3a 开发切片 | 可追加 Data Schema Identities、不可变 bootstrap Revision Registry、owner 只读查询与 Source 下载 | 重启幂等、首次 Source 保留、父/子事实拒绝改写、读取可复验；Distribution 仍为 alpha.2 |
 | alpha.3b 开发切片 | 版本化 Draft、raw Source Replace、Validation、Change Plan、创建幂等与 ETag 并发保护 | invalid → replace → valid → plan 可复现，Candidate/Runtime/Record 均不改变；Distribution 仍为 alpha.2 |
+| P0-02a runnable slice | 由有效 Plan 发布 Candidate Revision 与 environment-scoped Module Release；专用幂等、事务内再授权和成功安全审计 | 首次/重放/重启返回同一 Release；Candidate 入 Registry，Runtime/Record 不变；没有 Activate/Migration |
 | P0-01a 开发切片 | 持久化 Project、单默认 Environment、Principal/`project.owner` Grant，以及 Record/Revision/Draft 的 Application Access Kernel | 默认 Scope 重启稳定，撤销 Grant 后 fail closed 且不会被重启恢复；完整 P0-01 与多 Environment 数据隔离仍未完成 |
 | P0-01b runnable slice | digest-only bootstrap/API Credential、Service Principal、Owner Grant API、终态、last-owner 与最小安全审计 | issue → verify → revoke；401/403/503；restart 不复活 Credential/Grant；完整 P0-01 与 P0-05 仍未完成 |
 | v0.1.0-alpha.3 | Draft/Validate/Plan/Publish/Activate/Rollback、迁移计划、审计、Outbox、本地 Worker、Email Capability | 发布失败可恢复，活动 Revision 可回滚，副作用可追踪 |
@@ -71,7 +72,7 @@ v0.1.0 是 Preview，不作“任意业务零代码生成”或“百万并发�
 - Server：启动时从文件编译一个 AppModule、运行 migration 并装配 PostgreSQL；重启后 Record 保留。
 - 集成门禁：使用真实 PostgreSQL 18.4 验证 migration、Store 与 Server HTTP 持久化旅程。
 
-alpha.2 Distribution 没有发布状态。alpha.3a 会保存不可变 bootstrap Revision；alpha.3b 会保存 Draft、Validation 和 Change Plan，但 Server 仍从指定 YAML/JSON 文件编译当前模块。这些事实都不代表已发布或激活。
+alpha.2 Distribution 没有发布状态。当前开发切片中，alpha.3a 保存不可变 bootstrap Revision，alpha.3b 保存 Draft、Validation 和 Change Plan，P0-02a 保存不可变 Candidate Revision 与 Module Release；Server 仍从指定 YAML/JSON 文件编译当前模块。登记和 Publish Facts 都不代表已激活。
 
 ### 4.1 alpha.2 持久化已知风险
 
@@ -117,7 +118,7 @@ alpha.3 必须用后续 ADR 定案并验证：显式且幂等的数据迁移；�
 - Project 已存在后只核对持久化设置、默认 Environment Key 与 Principal，不自动补回缺失或已撤销的 Grant。
 - Application `Execution` 显式绑定 Project/Environment Scope、Actor 与 Public/Admin Surface；Actor Project 必须与 Scope Project 一致，Actor 自报 Role 不参与授权。
 - Access Kernel 先核对 active 的精确默认 Scope。Public 只可进入 Record Operation；Admin 必须有 active、未撤销的持久化 Owner Grant；未知 Operation 与权威存储错误均 fail closed。
-- Record 5、Revision 3、Draft 8 个现有用例已在 Application 层固定 Operation 并授权；Record 在 Access Kernel 后继续执行 AppModule Operation Policy。启动专用 `RegisterBootstrap` 不暴露为用户用例。
+- Record 5、Revision 3、Draft 8 与 Release 2 个用例已在 Application 层固定 Operation 并授权；Record 在 Access Kernel 后继续执行 AppModule Operation Policy。启动专用 `RegisterBootstrap` 不暴露为用户用例。
 - `0001`–`0003` 的事实表仍没有 `environment_id`，所以当前只允许单默认 Environment，不提供多 Environment 数据隔离。
 - migration `0005` 增加 Service Principal/API Credential、bootstrap marker、Grant lifecycle 与最小 append-only security audit；所有新旧 Admin 用例使用 `Credential → Principal → Grant`。
 - 首启只持久化 digest/hint，marker 后续允许省略/相同 Token、拒绝改变；Credential revoke 与 Principal disable 是终态，Grant 可显式重新授予但启动不自动补回。
@@ -125,18 +126,28 @@ alpha.3 必须用后续 ADR 定案并验证：显式且幂等的数据迁移；�
 
 P0-01a/P0-01b 是 `runnable-slice`，不是完整 P0-01/P0-05，也不把 Server Core 提升为 feature-complete 或 production-ready。具体边界见 [ADR-0004](adr/0004-persistent-execution-scope-access-kernel.md)与 [ADR-0005](adr/0005-project-local-access-administration.md)。
 
+### 4.5 P0-02a 不可变 Publish Facts
+
+- Publish 只接受 `module`、一个精确 `plan_id` 与发布专用 `Idempotency-Key`；服务端先在短事务内解析已发布事实，未命中才从 PostgreSQL 重建 Draft/Validation/Plan 链并重新编译精确 Source。
+- 首次发布只允许当前、有效、非 stale 且结果为 `compatible`、`review_required` 或 `migration_required` 的 Plan；`unsupported` 不可首次发布。
+- Candidate Revision、environment-scoped Module Release、Key Binding 与 `release.publish` 成功安全审计在首次发布事务提交；重放 alias 的 Key 与成功审计在短事务提交。两个事务都再次验证 Credential/Principal/Owner Grant。
+- Draft stale 后，同 Key/同意图及同 Plan/新 Key 仍返回原 Release；同 Key/异意图在 Plan 查找前冲突。Release、Key Binding 与 Registry 都不可更新或删除。
+- Publish effects 固定为 Revision 已登记、Release 已发布，但未激活、未迁移、Runtime 未改变且激活不受支持。
+
+P0-02a 是完整 P0-02 的第一段，不包含 active pointer、Snapshot/epoch、Migration、Activate 或 Rollback。具体边界见 [ADR-0006](adr/0006-immutable-module-release-publish-facts.md)。
+
 ## 5. alpha.3 延后能力
 
-- Publish、Activate、Rollback 与活动版本状态机；Registry 与准备变化事实已在 alpha.3a/alpha.3b 建立。
+- Activate、Rollback 与活动版本状态机；Registry、准备变化事实与 P0-02a Publish Facts 已建立。
 - 数据迁移执行、完整升级兼容检查和 last-known-good 恢复；alpha.3b Plan 只解释变化。
-- 通用 Audit、Idempotency、Transactional Outbox、进程内 Worker 和邮件副作用；P0-01b 只有访问安全审计。
+- 通用 Audit、Idempotency、Transactional Outbox、进程内 Worker 和邮件副作用；当前只有访问安全审计和 Release 专用幂等。
 - Provider Descriptor、Capability Resolution、Console/SMTP Email Adapter。
 - Manager 前端应用；alpha.2 只生成 UI Schema。
 - 动态排序；alpha.2 会拒绝任何非空 `sortable` 声明。
-- 通用业务 Idempotency Key、发布 epoch、多节点模块收敛和分布式 Runtime；alpha.3b Key 只用于 Create Draft。
+- 通用业务 Idempotency Key、发布 epoch、多节点模块收敛和分布式 Runtime；当前 Key 只用于 Create Draft 与 Release Publish 的专用事实。
 - 完整 P0-01：Account/ExternalIdentity/Session、ProjectMembership、动态 Role/Policy、RecordOwner、字段/动作级授权，以及真正多 Environment 事实；P0-01b 只覆盖机器 Principal/Credential 与固定 Owner Grant。
 - 多 Environment 事实隔离：为 Record、Revision、Draft 等既有事实增加 `environment_id`，完成回填、复合约束、游标、幂等键、升级与回滚验证；P0-01a 只拒绝非默认 Scope。
-- Release、Migration、Provider 与后续 Job/Event 用例接入同一 Access Kernel；这些用例尚未实现，不能由 P0-01a 代替其授权负例。
+- Release Publish/Get 已接入 Access Kernel；Activate/Rollback、Migration、Provider 与后续 Job/Event 仍须逐个接入，不能由 P0-01a 代替其授权负例。
 - 业务写入与 Outbox 同事务、ProjectReleaseSnapshot + epoch，以及宽唯一值的 Hash 索引加原值碰撞复核评估。
 
 ## 6. v0.1 目标范围（不等于 alpha.2 当前能力）
@@ -178,14 +189,14 @@ P0-01a/P0-01b 是 `runnable-slice`，不是完整 P0-01/P0-05，也不把 Server
 - 动态 Action 只能调用白名单 Capability，并受超时、权限和幂等约束。
 - 分布式节点以 ProjectReleaseSnapshot + epoch 激活；请求、Job、Event 在执行期间固定 epoch。
 
-这些是不变式目标。alpha.3a 验证“不可变登记事实”，alpha.3b 验证 Validate 无执行副作用和 Plan 不改变运行状态；它们不表示当前存在发布器、激活器、迁移器或回滚器。
+这些是不变式逐步落地。alpha.3a 验证“不可变登记事实”，alpha.3b 验证 Validate 无执行副作用和 Plan 不改变运行状态，P0-02a 验证 Publish 只写不可变事实；当前仍不存在激活器、迁移器或回滚器。
 
 ## 9. v0.1 完成定义
 
 必须同时满足：
 
 - 新环境按 development.md 可以在 15 分钟内启动 Lite 和 PostgreSQL 开发环境。
-- crm-leads 从声明到 CRUD、Manager、Event、Email 和回滚形成纵向闭环；其中 Event、Email、发布和回滚仍待 alpha.3。
+- crm-leads 从声明到 CRUD、Manager、Event、Email 和回滚形成纵向闭环；其中 Publish Facts 已有窄切片，Event、Email、Activate/Migration 和回滚仍待后续。
 - 当前及前一 Go 版本兼容门禁通过。
 - PostgreSQL 迁移 fresh、upgrade、restart、rollback-policy 测试通过。
 - AppModule golden、fuzz、兼容矩阵和恶意输入测试通过。

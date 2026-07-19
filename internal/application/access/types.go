@@ -80,6 +80,10 @@ const (
 	OperationDraftGetValidation Operation = "draft.get_validation"
 	// OperationDraftGetPlan authorizes reading a draft change-plan snapshot.
 	OperationDraftGetPlan Operation = "draft.get_plan"
+	// OperationReleasePublish authorizes creating an immutable module release fact.
+	OperationReleasePublish Operation = "release.publish"
+	// OperationReleaseGet authorizes reading one immutable module release fact.
+	OperationReleaseGet Operation = "release.get"
 
 	// OperationPrincipalList authorizes listing project-local principals.
 	OperationPrincipalList Operation = "access.principal.list"
@@ -122,6 +126,8 @@ func (operation Operation) Valid() bool {
 		OperationDraftPlan,
 		OperationDraftGetValidation,
 		OperationDraftGetPlan,
+		OperationReleasePublish,
+		OperationReleaseGet,
 		OperationPrincipalList,
 		OperationPrincipalCreate,
 		OperationPrincipalDisable,
