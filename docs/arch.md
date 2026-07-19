@@ -137,25 +137,25 @@ alpha.3 采用 Draft → Validate → Plan → Publish → Activate 的阶段边
 
 ### 4.1 当前执行作用域与授权边界
 
-P0-01a 在模块化单体内建立了最小、持久化的执行作用域。Migration `0004` 追加 Project、Environment、Principal 与 Access Grant；某个 Project ID 首次由 Server 装配时，原子创建一个默认 Environment、固定 `bootstrap-admin` Principal 和精确 `(project, environment, principal, project.owner)` Grant，同一 Project ID 后续重启复用并核对这些事实。新的 Project ID 与唯一 Key 会形成另一套隔离事实，但一个 Server 进程仍只装配一个 Project。Token 仍只是在进程内把请求认证为该 Principal，持久化 Grant 才决定 Admin 权限。
+P0-01a 在模块化单体内建立持久化执行作用域；P0-01b 的 migration `0005` 再加入 project-local Service Principal、digest-only API Credential、Owner Grant 管理、永久 bootstrap marker 与最小安全审计。某个 Project ID 首次装配时创建默认 Environment、`bootstrap-admin` 与精确 Owner Grant，并用首启 Token 原子登记 digest/hint + marker；之后 Token 可省略、相同可核对、不同值拒绝，revoked Credential 不会复活。新的 Project ID 与唯一 Key 会形成另一套隔离事实，但一个 Server 进程仍只装配一个 Project。
 
 ```mermaid
 flowchart LR
-    Token["Bearer Token"] --> Identity["HTTP authentication"]
-    Identity --> Execution["Execution<br/>Project + Environment + Actor + Surface"]
+    Token["Bearer Credential"] --> Identity["digest authentication"]
+    Identity --> Execution["Execution<br/>Project + Environment + Actor + Credential + Surface"]
     Execution --> UseCase["Application use case<br/>fixed Operation"]
     UseCase --> Kernel["Access Kernel"]
-    Kernel --> Reader["GrantReader"]
-    Reader --> Facts[("Project / default Environment<br/>Principal / project.owner Grant")]
+    Kernel --> Reader["AuthorityReader"]
+    Reader --> Facts[("Project / default Environment<br/>Principal / Credential / Grant")]
     Kernel -->|"deny, inactive, unavailable"| Rejected["Fail closed before business Store"]
     Kernel -->|"Record allowed"| ModulePolicy["AppModule operation policy"]
     Kernel -->|"Revision/Draft owner allowed"| Store["Application logic + Store"]
     ModulePolicy --> Store
 ```
 
-Record 的 List/Get/Create/Patch/Delete 5 个用例、Revision 的 List/Get/GetSource 3 个用例，以及 Draft 的 Create/Get/GetSource/Replace/Validate/Plan/GetValidation/GetPlan 8 个用例都在 Application 层固定 Operation 并调用同一个 Kernel。Public Surface 只能进入 Record Operation，Record 随后继续检查 AppModule Policy；Admin Surface 必须是非匿名 Actor，并在 active 默认 Scope 内拥有 active、未撤销的 `project.owner` Grant。Actor 自报 Role、未知 Operation 和授权存储故障都不能放行。
+Record 5、Revision 3、Draft 8 与 Access Administration 9 个固定 Operation 都在 Application 层调用同一个 Kernel。Public Surface 只能进入 Record Operation，Record 随后继续检查 AppModule Policy；Admin Surface 必须由 active Credential 认证 active Principal，并在 active 默认 Scope 内拥有 active Owner Grant。Actor/Provider 自报 Role、未知 Operation 和授权存储故障都不能放行。访问 mutation 在 PostgreSQL 事务内二次授权并写成功审计；Principal disable 与 Credential revoke 是终态，Grant 只允许另一个 Owner 显式重新授予，最后 Owner path 不能被移除。
 
-这里的 Environment 是执行契约与授权查询的一部分，不是已完成的多 Environment 数据隔离。`0001`–`0003` 的 Record、Revision、Draft 表没有 `environment_id`，所以 Kernel 只接受默认 Environment，其他 Environment 必须拒绝。完整 P0-01 仍需 Credential/Account/Membership、动态 Role/Policy、Record Owner、既有事实的 Environment 回填与复合约束，以及 Release、Migration、Provider、Job/Event 用例授权。详见 [ADR-0004](adr/0004-persistent-execution-scope-access-kernel.md)。
+这里的 Environment 是执行契约与授权查询的一部分，不是已完成的多 Environment 数据隔离。完整 P0-01 仍需 Account、ExternalIdentity、Session、ProjectMembership、动态 Role/Policy、RecordOwner、既有事实的 Environment 归属，以及 Release、Migration、Provider、Job/Event 用例授权。P0-05 的通用 Audit/Idempotency/Outbox 也仍缺失；P0-01b 最小访问安全审计不能代替它。详见 [ADR-0004](adr/0004-persistent-execution-scope-access-kernel.md)与 [ADR-0005](adr/0005-project-local-access-administration.md)。
 
 ## 5. 全球 Provider 体系
 
@@ -179,10 +179,11 @@ Core 面向 Capability 编程，第三方厂商只是 Adapter。Provider 协议�
 - 长期外部对象保存 Provider Instance、配置 Revision、Credential Version 与 External Reference。
 - 支付处理中不得透明切换 Provider。
 - 外部身份以 Issuer/Provider Instance + Subject 唯一定位，禁止按 Email 自动合并。
+- Google、Apple、Facebook、微信等身份必须经 `ExternalIdentityVerifier → Account/ExternalIdentity/Session → ProjectMembership → project-local Principal → Execution`；Provider Role/Email 绝不直接映射 Grant。
 
 ## 6. 分布式管理
 
-alpha.3a 已建立单节点、项目隔离的 PostgreSQL 不可变 Revision 事实库；alpha.3b 在同一 Server 中增加可版本化 Draft 与不可变 Validation/Plan；P0-01a 又为这些现有用例和 Record 用例增加单默认 Environment 的持久化 Scope 与 Application 授权。它们通过 Application Port 保留未来拆到 Manager 的边界，但不会为了当前中小开发者场景先增加独立服务。以下发布状态与分布式收敛仍是后续目标，不是当前能力：
+alpha.3a/3b 已建立 Registry 与 Draft/Validation/Plan；P0-01a/P0-01b 又增加默认 Environment Scope、Credential-backed Access Kernel 与 project-local 访问管理。它们通过 Application Port 保留未来拆分边界，但不会为了当前中小开发者场景先增加独立服务。以下发布状态与分布式收敛仍是后续目标，不是当前能力：
 
 - 数据面：无状态 API 节点和可水平扩展 Worker；请求显式携带 ProjectContext。
 - 控制面：Manager 管理模型、配置、Provider 引用和发布；产出不可变 Revision。
@@ -232,13 +233,13 @@ alpha.3a 已建立单节点、项目隔离的 PostgreSQL 不可变 Revision 事�
 
 ## 9. 当前落地与后续
 
-v0.1.0-alpha.2 已落地严格 YAML/JSON AppModule 解码、Canonical IR/Hash、OpenAPI、Manager UI Schema、flex JSONB Store、Public Create、Admin CRUD、等值过滤、Lite/Server Profile 和 PostgreSQL 18.4 必需集成门禁。当前开发分支继续落地 alpha.3a Registry、alpha.3b 的 raw Source Draft/Validation/Plan，以及 P0-01a 的持久化 Project、单默认 Environment、Principal/Owner Grant 和 Application Access Kernel。Distribution 仍保持 alpha.2。
+v0.1.0-alpha.2 已落地严格 AppModule、Canonical IR/Hash、OpenAPI/UI Schema、flex Store、CRUD、Lite/Server 与 PostgreSQL 门禁。当前开发分支继续落地 alpha.3a/3b 与 P0-01a/P0-01b 的持久化 Scope、Service Principal/API Credential/Owner Grant、marker、安全审计和 Application Access Kernel。Distribution 仍保持 alpha.2。
 
 Server 每次启动仍从配置的 Source 计算当前 Revision；migration 后先创建或核对持久化默认 Scope，再在 readiness 前幂等登记 Revision。Scope 初始化和登记都不等于发布或激活，Draft/Validation/Plan 也不会改变这条启动链路。任何 Canonical IR 变化仍会形成全新的空数据命名空间；旧 Revision 的 Record、唯一值和引用完整保留且按 Revision 隔离，不迁移、不重绑。Registry List 顺序不表达当前运行版本，当前值只能从 OpenAPI 的 `x-panvara-revision` 读取。Publish/Activate 完成前，变更前仍须备份数据库；覆盖启动 Source 不是升级。
 
 alpha.3 必须通过后续 ADR 定案迁移与激活协议：迁移任务显式且幂等，保留 `record_id`，在目标 namespace 重建 unique/reference 约束，校验成功后原子 Activate，失败或回滚继续使用旧 namespace；同时决定按 format 选择的 Data Schema Identity 如何参与 Record namespace 与迁移兼容判断。
 
-P0-01a 已把现有 Record/Revision/Draft 用例授权下沉到 Application，并显式携带 Project/Environment Scope、Actor、Surface 与固定 Operation。完整 P0-01 仍需 Credential/Account/Membership、Record Owner、动态策略与真正的多 Environment 事实隔离；未来 Release、Migration、Provider、Job/Event 用例必须接入同一 Kernel，不能把当前 16 个用例的覆盖误写成全面授权完成。
+P0-01b 已把现有与访问管理 Admin 用例统一为 Credential-backed Application 授权。完整 P0-01 仍需 Account/ExternalIdentity/Session/ProjectMembership、RecordOwner、动态策略与真正多 Environment 事实；未来 Release、Migration、Provider、Job/Event 用例必须接入同一 Kernel，不能把当前 runnable slice 误写成全面授权完成。
 
 alpha.3 还必须验证业务写入与 Outbox 同事务、ProjectReleaseSnapshot + epoch 固定执行版本，并评估超过当前 512 字节唯一值边界时是否采用 Hash 索引加原值碰撞复核；这些都不是 alpha.2 已实现能力。
 

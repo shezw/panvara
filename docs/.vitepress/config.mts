@@ -47,6 +47,7 @@ export default withMermaid(
           text: "路线图",
           items: [
             { text: "当前 Server 事实", link: "/architecture-review-server-current" },
+            { text: "P0-01b 访问管理 ADR", link: "/adr/0005-project-local-access-administration" },
             { text: "Server Core", link: "/roadmap/server-core" },
             { text: "Manager", link: "/roadmap/manager" },
           ],
@@ -88,6 +89,7 @@ export default withMermaid(
             { text: "运行模式", link: "/modules/runtime-profiles" },
             { text: "项目上下文", link: "/modules/project-context" },
             { text: "执行作用域与访问内核", link: "/modules/project-access" },
+            { text: "Project-local 访问管理", link: "/modules/access-administration" },
           ],
         },
         {
@@ -119,6 +121,7 @@ export default withMermaid(
             { text: "ADR-0002 不可变 Registry", link: "/adr/0002-immutable-revision-registry" },
             { text: "ADR-0003 Draft 与 Plan", link: "/adr/0003-draft-validation-change-plan" },
             { text: "ADR-0004 执行作用域与访问内核", link: "/adr/0004-persistent-execution-scope-access-kernel" },
+            { text: "ADR-0005 Project-local 访问管理", link: "/adr/0005-project-local-access-administration" },
           ],
         },
       ],

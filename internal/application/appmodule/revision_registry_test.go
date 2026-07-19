@@ -17,6 +17,8 @@ package appmodule
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"sort"
 	"strings"
@@ -25,7 +27,7 @@ import (
 	"time"
 
 	"github.com/shezw/panvara/internal/application/access"
-	"github.com/shezw/panvara/internal/domain/actor"
+	domainaccess "github.com/shezw/panvara/internal/domain/access"
 	domain "github.com/shezw/panvara/internal/domain/appmodule"
 	"github.com/shezw/panvara/internal/domain/project"
 	spec "github.com/shezw/panvara/internal/spec/appmodule/v1alpha1"
@@ -316,15 +318,6 @@ func revisionTestProject(t *testing.T, value string) project.ID {
 	return id
 }
 
-func revisionTestActor(t *testing.T, projectID project.ID, id string, roles []string) actor.Context {
-	t.Helper()
-	value, err := actor.New(projectID.String(), id, roles)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return value
-}
-
 func appmoduleTestExecution(
 	t *testing.T,
 	projectID project.ID,
@@ -332,6 +325,9 @@ func appmoduleTestExecution(
 	roles []string,
 ) access.Execution {
 	t.Helper()
+	// Credential authentication deliberately discards roles reported by a
+	// caller. Policy-specific role assertions live in the access package.
+	_ = roles
 	environmentID, err := project.ParseEnvironmentID("01981234-5678-7abc-8def-0123456789fe")
 	if err != nil {
 		t.Fatal(err)
@@ -340,15 +336,48 @@ func appmoduleTestExecution(
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := access.NewExecution(
-		scope,
-		revisionTestActor(t, projectID, actorID, roles),
-		access.SurfaceAdmin,
-	)
+	credentialID, err := domainaccess.ParseID("01981234-5678-7abc-8def-0123456789fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const bearer = "appmodule-test-bootstrap-token-32-bytes"
+	digest := sha256.Sum256([]byte(bearer))
+	credential, err := domainaccess.NewCredential(domainaccess.CredentialMaterial{
+		Scope: scope, ID: credentialID, PrincipalID: actorID,
+		Label: "application test credential", Hint: "sha256:" + hex.EncodeToString(digest[:6]),
+		Status: domainaccess.CredentialStatusActive, IssuedBy: actorID,
+		IssuedAt: time.Date(2026, time.July, 19, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := access.NewCredentialAuthenticator(appmoduleCredentialLookup{
+		candidate: access.CredentialCandidate{Credential: credential, SecretDigest: digest},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := authenticator.Authenticate(context.Background(), scope, bearer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := access.NewAdminExecution(scope, principal)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return execution
+}
+
+type appmoduleCredentialLookup struct {
+	candidate access.CredentialCandidate
+}
+
+func (lookup appmoduleCredentialLookup) LookupCredential(
+	context.Context,
+	project.Scope,
+	access.CredentialSelector,
+) (access.CredentialCandidate, error) {
+	return lookup.candidate, nil
 }
 
 func revisionStoreKey(projectID project.ID, module, revision string) string {

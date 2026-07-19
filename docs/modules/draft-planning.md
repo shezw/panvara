@@ -41,7 +41,7 @@ alpha.3b 实现项目 owner 作用域内的 Draft 创建、读取与原始 Sourc
 ## 前置条件
 
 - 使用 Server Profile，并已完成[本地环境](../getting-started/local-environment.md)。
-- PostgreSQL 18.4、`PANVARA_PROJECT_ID` 和 `PANVARA_ADMIN_TOKEN` 已配置。
+- PostgreSQL 18.4、`PANVARA_PROJECT_ID` 和一个有效 Owner Credential 已配置；下面的首启示例使用 `PANVARA_ADMIN_TOKEN`。
 - 默认 `crm.leads` 已启动，并能从 OpenAPI 读取 `x-panvara-revision`。
 - 使用 `curl` 调用 API，使用 `jq` 检查 JSON。
 - 先理解 [Revision Registry](revision-registry.md) 保存的是不可变事实，不是活动版本列表。

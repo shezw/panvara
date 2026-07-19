@@ -16,6 +16,8 @@ package record
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -23,6 +25,7 @@ import (
 	"time"
 
 	"github.com/shezw/panvara/internal/application/access"
+	domainaccess "github.com/shezw/panvara/internal/domain/access"
 	"github.com/shezw/panvara/internal/domain/actor"
 	"github.com/shezw/panvara/internal/domain/project"
 )
@@ -438,26 +441,69 @@ func testExecution(t *testing.T, recordScope Scope, surface Surface) access.Exec
 	if err != nil {
 		t.Fatalf("project.NewScope() error = %v", err)
 	}
-	var subject actor.Context
-	var accessSurface access.Surface
 	switch surface {
 	case SurfacePublic:
-		subject, err = actor.NewAnonymous(recordScope.ProjectID.String())
-		accessSurface = access.SurfacePublic
+		subject, actorErr := actor.NewAnonymous(recordScope.ProjectID.String())
+		if actorErr != nil {
+			t.Fatalf("construct test actor: %v", actorErr)
+		}
+		execution, executionErr := access.NewPublicExecution(projectScope, subject)
+		if executionErr != nil {
+			t.Fatalf("access.NewPublicExecution() error = %v", executionErr)
+		}
+		return execution
 	case SurfaceAdmin:
-		subject, err = actor.New(recordScope.ProjectID.String(), "test-admin", nil)
-		accessSurface = access.SurfaceAdmin
+		return testAdminExecution(t, projectScope, "test-admin")
 	default:
 		t.Fatalf("unsupported test surface %q", surface)
 	}
+	return access.Execution{}
+}
+
+func testAdminExecution(t *testing.T, scope project.Scope, principalID string) access.Execution {
+	t.Helper()
+	credentialID, err := domainaccess.ParseID("01981234-5678-7abc-8def-0123456789fd")
 	if err != nil {
-		t.Fatalf("construct test actor: %v", err)
+		t.Fatal(err)
 	}
-	execution, err := access.NewExecution(projectScope, subject, accessSurface)
+	const bearer = "record-test-bootstrap-token-32-bytes"
+	digest := sha256.Sum256([]byte(bearer))
+	credential, err := domainaccess.NewCredential(domainaccess.CredentialMaterial{
+		Scope: scope, ID: credentialID, PrincipalID: principalID,
+		Label: "record test credential", Hint: "sha256:" + hex.EncodeToString(digest[:6]),
+		Status: domainaccess.CredentialStatusActive, IssuedBy: principalID,
+		IssuedAt: time.Date(2026, time.July, 19, 0, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
-		t.Fatalf("access.NewExecution() error = %v", err)
+		t.Fatal(err)
+	}
+	authenticator, err := access.NewCredentialAuthenticator(recordCredentialLookup{
+		candidate: access.CredentialCandidate{Credential: credential, SecretDigest: digest},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := authenticator.Authenticate(context.Background(), scope, bearer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := access.NewAdminExecution(scope, principal)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return execution
+}
+
+type recordCredentialLookup struct {
+	candidate access.CredentialCandidate
+}
+
+func (lookup recordCredentialLookup) LookupCredential(
+	context.Context,
+	project.Scope,
+	access.CredentialSelector,
+) (access.CredentialCandidate, error) {
+	return lookup.candidate, nil
 }
 
 type validatorFunc func(context.Context, ValidationInput) (ValidatedData, error)

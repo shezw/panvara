@@ -19,6 +19,7 @@ import (
 	"errors"
 	"testing"
 
+	domainaccess "github.com/shezw/panvara/internal/domain/access"
 	"github.com/shezw/panvara/internal/domain/actor"
 	"github.com/shezw/panvara/internal/domain/project"
 )
@@ -28,11 +29,14 @@ var errGrantStore = errors.New("grant store offline")
 type fakeGrantReader struct {
 	active          bool
 	scopeError      error
+	credentialOff   bool
+	credentialError error
 	grant           bool
 	grantError      error
 	grantScope      project.Scope
 	scopeCalls      int
 	grantCalls      int
+	credentialCalls int
 	lastScope       project.Scope
 	lastPrincipalID string
 	lastRole        string
@@ -42,6 +46,21 @@ func (reader *fakeGrantReader) ScopeActive(_ context.Context, scope project.Scop
 	reader.scopeCalls++
 	reader.lastScope = scope
 	return reader.active, reader.scopeError
+}
+
+func (reader *fakeGrantReader) CredentialActive(
+	_ context.Context,
+	scope project.Scope,
+	principalID string,
+	_ domainaccess.ID,
+) (bool, error) {
+	reader.credentialCalls++
+	reader.lastScope = scope
+	reader.lastPrincipalID = principalID
+	if reader.credentialError != nil {
+		return false, reader.credentialError
+	}
+	return !reader.credentialOff, nil
 }
 
 func (reader *fakeGrantReader) HasActiveGrant(
@@ -112,15 +131,22 @@ func TestPolicyAllowsAdminOnlyFromAuthoritativeExactGrant(t *testing.T) {
 
 func TestPolicyRejectsAnonymousAdmin(t *testing.T) {
 	scope := testScope(t, testProjectID, testEnvironmentID)
-	execution := mustExecution(t, scope, testAnonymous(t, testProjectID), SurfaceAdmin)
-	reader := &fakeGrantReader{active: true, grant: true, grantScope: scope}
+	if _, err := NewExecution(scope, testAnonymous(t, testProjectID), SurfaceAdmin); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("NewExecution() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestPolicyRejectsInactiveCredentialBeforeGrant(t *testing.T) {
+	scope := testScope(t, testProjectID, testEnvironmentID)
+	execution := mustExecution(t, scope, testActor(t, testProjectID, "owner-1", nil), SurfaceAdmin)
+	reader := &fakeGrantReader{active: true, credentialOff: true, grant: true, grantScope: scope}
 
 	err := mustPolicy(t, reader).Authorize(context.Background(), execution, OperationRecordList)
 	if !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("Authorize() error = %v, want ErrUnauthenticated", err)
 	}
-	if reader.grantCalls != 0 {
-		t.Fatalf("anonymous admin caused %d grant reads", reader.grantCalls)
+	if reader.credentialCalls != 1 || reader.grantCalls != 0 {
+		t.Fatalf("credential calls = %d, grant calls = %d", reader.credentialCalls, reader.grantCalls)
 	}
 }
 
@@ -180,6 +206,7 @@ func TestPolicyMapsGrantReaderFailuresToUnavailable(t *testing.T) {
 		reader *fakeGrantReader
 	}{
 		{name: "scope", reader: &fakeGrantReader{scopeError: errGrantStore}},
+		{name: "credential", reader: &fakeGrantReader{active: true, credentialError: errGrantStore}},
 		{name: "grant", reader: &fakeGrantReader{active: true, grantError: errGrantStore}},
 	}
 	for _, test := range tests {
@@ -281,7 +308,21 @@ func mustExecution(
 	surface Surface,
 ) Execution {
 	t.Helper()
-	execution, err := NewExecution(scope, subject, surface)
+	var execution Execution
+	var err error
+	if surface == SurfaceAdmin {
+		credentialID, parseErr := domainaccess.ParseID("019f5c36-b326-7c52-9325-ec59f95c8fae")
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		principal, principalErr := newAuthenticatedPrincipal(scope, subject, credentialID)
+		if principalErr != nil {
+			t.Fatal(principalErr)
+		}
+		execution, err = NewAdminExecution(scope, principal)
+	} else {
+		execution, err = NewExecution(scope, subject, surface)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

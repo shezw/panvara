@@ -253,18 +253,12 @@ func newTestHandlerWithDrafts(t *testing.T, drafts DraftWorkflowService) *Handle
 	if err != nil {
 		t.Fatal(err)
 	}
-	adminActor, err := actor.New(testProjectID, "bootstrap-admin", []string{"project.owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	auth, err := NewBootstrapAdminAuth(testAdminToken, adminActor)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scope := testProjectScope(t)
+	auth := newTestAdminAuth(t, scope)
 	handler, err := New(Config{
-		Project: projectContext, Scope: testProjectScope(t),
+		Project: projectContext, Scope: scope,
 		PublicActor: publicActor, Module: fakeModule{}, Records: &fakeRecordService{},
-		Drafts: drafts, AdminAuth: auth,
+		Drafts: drafts, AdminAuth: auth, AccessAdministration: &fakeAccessAdministration{},
 	})
 	if err != nil {
 		t.Fatal(err)

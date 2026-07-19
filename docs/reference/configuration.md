@@ -44,7 +44,7 @@ set -a; . ./.env; . ./.env.local; set +a
 | `PANVARA_PROJECT_TIME_ZONE` | `UTC` |  | 否 | IANA 时区，例如 `Asia/Shanghai` |
 | `PANVARA_PROJECT_CURRENCY` | `USD` |  | 否 | 项目默认币种，例如 `CNY`、`EUR` |
 | `PANVARA_ENVIRONMENT_KEY` | `default` |  | 否 | 当前唯一默认 Environment 的可读 Key |
-| `PANVARA_ADMIN_TOKEN` | 至少 32 字节 | ✓ | ✓ | 将 Bearer 请求认证为 `bootstrap-admin`；Admin 授权仍读取持久化 Grant |
+| `PANVARA_ADMIN_TOKEN` | 32–1024 字节、仅 Bearer 安全 ASCII、非 `pvk1.` 前缀 | 首次 marker 初始化 ✓ | ✓ | 首启只持久化 digest/hint；marker 已存在后可省略，相同可用，不同值拒绝 |
 
 ## Project、Environment 与访问 bootstrap
 
@@ -53,9 +53,11 @@ P0-01a 开发切片在 migration 之后、HTTP 就绪之前建立最小持久化
 - 某个 `PANVARA_PROJECT_ID` 第一次由 Server 装配时，按 `PANVARA_PROJECT_*` 持久化 Project，生成 UUIDv7 默认 Environment，并创建 `bootstrap-admin` Principal 与精确作用域内的 `project.owner` Grant。
 - `PANVARA_ENVIRONMENT_KEY` 未设置时默认为 `default`。Environment ID 由 Server 生成，不通过配置指定。
 - 后续以同一 Project ID 和相同配置重启会复用持久化身份；该 Project 的 Key、Locale、Time Zone、Currency 或 Environment Key 与数据库不一致时拒绝启动，不会静默更新。新的 Project ID 与新的全局唯一 Key 会创建另一套 Project 事实，而不是修改或迁移旧数据。
-- Admin Token 只认证 Principal。Application 层每次从 PostgreSQL 读取 active、未撤销的 Owner Grant 决定授权；撤销 Grant 后，即使 Token 不变、Server 重启，也不会自动恢复权限。
+- 首次 `0005` 初始化要求 32–1024 字节、只含 HTTP Bearer 安全 ASCII（字母、数字、`-._~+/`，`=` 只能尾随）且不以保留前缀 `pvk1.` 开头的 Token，并原子持久化 API Credential 的 SHA-256 digest、hint 与永久 marker；原始 Token 不入库。`pvk1.` 只用于 Panvara 签发的 Service Credential，bootstrap 使用会与 selector 语义冲突。marker 存在后启动可省略 Token，提供相同值可核对，提供不同值拒绝启动。revoked bootstrap Credential 永不复活。
+- 从 `0004` 升级且 marker 尚不存在时，如果旧本地 Token 恰好以 `pvk1.` 开头，只能在首次 `0005` 初始化前换成新的合法随机值；marker 成功创建后禁止再改变。
+- 所有 Bearer Credential 只认证 Principal。Application 层读取 active Credential/Principal 与 active Owner Grant 决定授权；Grant 被撤销后 Server 重启不会自动恢复，但另一个有效 Owner 可显式 PUT 重新授予。
 
-这只是 P0-01a 可运行切片，不是完整 P0-01 或 IAM。当前没有 Account/Credential/Membership、动态 Role/Policy、Grant 管理 API，也没有多 Environment 业务数据隔离；Record、Revision 与 Draft 表仍无 `environment_id`。使用与验收见[执行作用域与访问内核指南](../modules/project-access.md)，架构约束见 [ADR-0004](../adr/0004-persistent-execution-scope-access-kernel.md)。
+这只是 P0-01a/P0-01b 可运行切片，不是完整 P0-01 或 IAM。当前有 project-local Service Principal/API Credential/固定 Owner Grant，但没有 Account、ExternalIdentity、Session、ProjectMembership、动态 Role/Policy、RecordOwner 或多 Environment 业务事实；Record、Revision 与 Draft 表仍无真正的 Environment 隔离。使用与验收见[执行作用域与访问内核指南](../modules/project-access.md)和[访问管理指南](../modules/access-administration.md)，架构约束见 [ADR-0004](../adr/0004-persistent-execution-scope-access-kernel.md)与 [ADR-0005](../adr/0005-project-local-access-administration.md)。
 
 ## 本地 Compose 变量
 
@@ -72,7 +74,7 @@ Panvara 使用的 PostgreSQL 18.4 数据库必须采用 UTF8 `server_encoding`�
 
 alpha.3a Registry 开发切片不增加配置项。Server 在 migration 与 P0-01a 作用域初始化之后、对外就绪之前，使用当前持久化 Project、`PANVARA_MODULE_SOURCE` 和 `PANVARA_MODULE_FORMAT` 进行幂等 bootstrap 登记；失败会阻止启动。
 
-`PANVARA_ADMIN_TOKEN` 负责认证 Registry 读取接口，以及 alpha.3b Draft、Validation 与 Plan 控制面接口的 `bootstrap-admin` Principal；这些 Admin 用例仍由持久化 Owner Grant 授权。当前没有 active Revision、Publish、Activate 或 Rollback 配置，也不能用 Registry List 顺序配置运行版本。
+任一 active project-local Credential 都可认证 Registry 读取，以及 alpha.3b Draft、Validation 与 Plan 控制面；这些 Admin 用例仍由持久化 Owner Grant 授权。当前没有 active Revision、Publish、Activate 或 Rollback 配置，也不能用 Registry List 顺序配置运行版本。
 
 `data_schema_identities` 也不是配置项。它是 Panvara 为不可变父 Revision 计算并按 format 升序返回的派生身份数组；新增算法只能追加新的 format，用户不能通过环境变量覆盖 fingerprint。
 
@@ -93,6 +95,7 @@ alpha.3b 不增加环境变量。Draft Baseline 必须由每个 Create 请求显
 - `.env` 和 `.env.local` 不提交 Git。
 - 生产环境不要复用示例数据库密码或本地管理员 Token。
 - CLI 参数通常能被同机进程观察，管理员 Token 不使用 `--admin-token`。
-- Project/Environment/Principal/Grant 表不保存 Admin Token 或 Token 摘要；Token 仍应只通过可信环境注入，不能因为数据库未保存它就降低保护等级。
-- 不把 Token 通过等同于已经授权；持久化 Grant 被撤销或作用域停用时，正确 Token 的 Admin 请求仍应返回 403。
+- PostgreSQL 只保存 Credential 的 SHA-256 digest、hint 与 metadata，不保存原始 Token；digest 也是敏感认证材料，不应查询、导出或记录。
+- 不把 Credential 通过等同于已经授权；持久化 Grant 被撤销或作用域停用时，正确 Token 的 Admin 请求仍应返回 403；权威状态不可用时返回 503。
+- 签发 API 只在成功 201 响应返回原始 Token 一次；接收方必须直接存入 Secret Store 或 0600 临时文件，禁止输出 Response Body。
 - 生产凭据最终应由 Secret Manager 通过受控引用注入；alpha.2 尚未实现 Secret Reference Runtime。

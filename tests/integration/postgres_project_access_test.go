@@ -101,12 +101,13 @@ func TestPostgresProjectEnvironmentAccess(t *testing.T) {
 	assertProjectConfigurationDriftFails(t, ctx, store, definition)
 	assertConcurrentSecondProjectBootstrapIsStable(t, ctx, store, scope)
 	assertNonDefaultEnvironmentIsInactive(t, ctx, pool, store, scope)
-	assertAccessSchemaContainsNoCredentials(t, ctx, pool)
+	assertAccessSchemaStoresOnlyCredentialDigests(t, ctx, pool)
 	assertProjectAccessConstraints(t, ctx, pool, scope, definition)
 
 	if _, err := pool.Exec(ctx, `
 		UPDATE panvara_access_grant
-		SET revoked_at = clock_timestamp()
+		SET revoked_by_principal_id = 'bootstrap-admin',
+		    revoked_at = clock_timestamp(), updated_at = clock_timestamp()
 		WHERE project_id = $1 AND environment_id = $2
 		  AND principal_id = 'bootstrap-admin' AND role = 'project.owner'
 	`, scope.ProjectID().String(), scope.EnvironmentID().String()); err != nil {
@@ -174,7 +175,8 @@ func assertBootstrapRows(
 	t.Helper()
 	var (
 		projectKey, locale, timeZone, currency, projectStatus string
-		environmentKey, environmentStatus, principalStatus    string
+		environmentKey, environmentStatus, principalKind      string
+		principalDisplayName, principalStatus                 string
 		isDefault                                             bool
 		grantCount                                            int
 	)
@@ -204,13 +206,18 @@ func assertBootstrapRows(
 		t.Fatalf("persisted environment = %q default=%t status=%q", environmentKey, isDefault, environmentStatus)
 	}
 	if err := pool.QueryRow(ctx, `
-		SELECT status FROM panvara_principal
+		SELECT kind, display_name, status FROM panvara_principal
 		WHERE project_id = $1 AND principal_id = 'bootstrap-admin'
-	`, scope.ProjectID().String()).Scan(&principalStatus); err != nil {
+	`, scope.ProjectID().String()).Scan(
+		&principalKind, &principalDisplayName, &principalStatus,
+	); err != nil {
 		t.Fatalf("read bootstrap principal: %v", err)
 	}
-	if principalStatus != "active" {
-		t.Fatalf("bootstrap principal status = %q", principalStatus)
+	if principalKind != "bootstrap" || principalDisplayName != "bootstrap-admin" ||
+		principalStatus != "active" {
+		t.Fatalf("bootstrap principal = kind %q display %q status %q",
+			principalKind, principalDisplayName, principalStatus,
+		)
 	}
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM panvara_access_grant
@@ -408,7 +415,8 @@ func assertNonDefaultEnvironmentIsInactive(
 	}
 
 	if _, err := pool.Exec(ctx, `
-		UPDATE panvara_principal SET status = 'disabled', updated_at = clock_timestamp()
+		UPDATE panvara_principal
+		SET status = 'disabled', disabled_at = clock_timestamp(), updated_at = clock_timestamp()
 		WHERE project_id = $1 AND principal_id = 'bootstrap-admin'
 	`, defaultScope.ProjectID().String()); err != nil {
 		t.Fatalf("disable bootstrap principal: %v", err)
@@ -416,11 +424,24 @@ func assertNonDefaultEnvironmentIsInactive(
 	if granted, err := store.HasActiveGrant(ctx, defaultScope, "bootstrap-admin", "project.owner"); err != nil || granted {
 		t.Fatalf("HasActiveGrant(disabled principal) = %t, %v", granted, err)
 	}
-	if _, err := pool.Exec(ctx, `
-		UPDATE panvara_principal SET status = 'active', updated_at = clock_timestamp()
+	assertPostgresCode(t, "55000", func() error {
+		_, err := pool.Exec(ctx, `
+			UPDATE panvara_principal
+			SET status = 'active', disabled_at = NULL, updated_at = clock_timestamp()
+			WHERE project_id = $1 AND principal_id = 'bootstrap-admin'
+		`, defaultScope.ProjectID().String())
+		return err
+	})
+	var principalStatus string
+	var disabledAt *time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT status, disabled_at FROM panvara_principal
 		WHERE project_id = $1 AND principal_id = 'bootstrap-admin'
-	`, defaultScope.ProjectID().String()); err != nil {
-		t.Fatalf("restore bootstrap principal: %v", err)
+	`, defaultScope.ProjectID().String()).Scan(&principalStatus, &disabledAt); err != nil {
+		t.Fatalf("read bootstrap principal after rejected restoration: %v", err)
+	}
+	if principalStatus != "disabled" || disabledAt == nil {
+		t.Fatalf("bootstrap principal after rejected restoration = status %q disabled_at %v", principalStatus, disabledAt)
 	}
 
 	if _, err := pool.Exec(ctx, `
@@ -458,7 +479,7 @@ func assertNonDefaultEnvironmentIsInactive(
 	}
 }
 
-func assertAccessSchemaContainsNoCredentials(t *testing.T, ctx context.Context, pool queryRower) {
+func assertAccessSchemaStoresOnlyCredentialDigests(t *testing.T, ctx context.Context, pool queryRower) {
 	t.Helper()
 	var sensitiveColumnCount int
 	if err := pool.QueryRow(ctx, `
@@ -466,14 +487,30 @@ func assertAccessSchemaContainsNoCredentials(t *testing.T, ctx context.Context, 
 		FROM information_schema.columns
 		WHERE table_schema = current_schema()
 		  AND table_name IN (
-			'panvara_project', 'panvara_environment', 'panvara_principal', 'panvara_access_grant'
+			'panvara_project', 'panvara_environment', 'panvara_principal',
+			'panvara_access_grant', 'panvara_api_credential',
+			'panvara_access_bootstrap_marker', 'panvara_security_audit_event'
 		  )
-		  AND column_name ~ '(token|secret|password|credential)'
+		  AND column_name ~ '(token|password|plaintext|raw_secret|secret_value)'
 	`).Scan(&sensitiveColumnCount); err != nil {
-		t.Fatalf("inspect project/access credential columns: %v", err)
+		t.Fatalf("inspect project/access plaintext credential columns: %v", err)
 	}
 	if sensitiveColumnCount != 0 {
-		t.Fatalf("project/access sensitive credential column count = %d, want 0", sensitiveColumnCount)
+		t.Fatalf("project/access plaintext credential column count = %d, want 0", sensitiveColumnCount)
+	}
+	var digestColumnCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM information_schema.columns
+		WHERE table_schema = current_schema()
+		  AND table_name IN ('panvara_api_credential', 'panvara_access_bootstrap_marker')
+		  AND column_name = 'secret_digest'
+		  AND data_type = 'bytea'
+	`).Scan(&digestColumnCount); err != nil {
+		t.Fatalf("inspect project/access digest columns: %v", err)
+	}
+	if digestColumnCount != 2 {
+		t.Fatalf("project/access digest column count = %d, want 2", digestColumnCount)
 	}
 }
 
@@ -488,16 +525,20 @@ func assertProjectAccessConstraints(
 	assertPostgresCode(t, "23514", func() error {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO panvara_access_grant (
-				project_id, environment_id, principal_id, role
-			) VALUES ($1, $2, 'bootstrap-admin', 'project.editor')
+				project_id, environment_id, principal_id, role,
+				granted_by_principal_id, updated_at
+			) VALUES ($1, $2, 'bootstrap-admin', 'project.editor',
+			          'bootstrap-admin', clock_timestamp())
 		`, scope.ProjectID().String(), scope.EnvironmentID().String())
 		return err
 	})
 	assertPostgresCode(t, "23503", func() error {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO panvara_access_grant (
-				project_id, environment_id, principal_id, role
-			) VALUES ($1, $2, 'missing-principal', 'project.owner')
+				project_id, environment_id, principal_id, role,
+				granted_by_principal_id, updated_at
+			) VALUES ($1, $2, 'missing-principal', 'project.owner',
+			          'bootstrap-admin', clock_timestamp())
 		`, scope.ProjectID().String(), scope.EnvironmentID().String())
 		return err
 	})

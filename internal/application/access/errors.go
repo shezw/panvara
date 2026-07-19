@@ -17,8 +17,16 @@ package access
 import "errors"
 
 var (
-	// ErrInvalidRequest reports an incomplete or contradictory authorization input.
-	ErrInvalidRequest = errors.New("invalid access request")
+	// ErrInvalid reports malformed access input or an invalid lifecycle request.
+	ErrInvalid = errors.New("invalid access request")
+	// ErrInvalidRequest is the backwards-compatible name for ErrInvalid.
+	ErrInvalidRequest = ErrInvalid
+	// ErrNotFound reports an absent access-domain fact in the exact scope.
+	ErrNotFound = errors.New("access fact not found")
+	// ErrConflict reports a duplicate or stale access lifecycle transition.
+	ErrConflict = errors.New("access lifecycle conflict")
+	// ErrLastOwnerPath rejects removal of the final usable project-owner path.
+	ErrLastOwnerPath = errors.New("last project owner path")
 	// ErrUnauthenticated reports an admin request without an authenticated principal.
 	ErrUnauthenticated = errors.New("access authentication required")
 	// ErrForbidden reports a recognized principal or surface without permission.

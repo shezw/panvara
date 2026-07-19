@@ -73,7 +73,6 @@ run:
 	$(GO) run ./cmd/panvara --profile=lite
 
 run-server:
-	@test -n "$$PANVARA_ADMIN_TOKEN" || { echo "PANVARA_ADMIN_TOKEN must be exported; generate at least 32 random bytes" >&2; exit 1; }
 	$(GO) run ./cmd/panvara --profile=server
 
 infra-up:

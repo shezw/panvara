@@ -28,10 +28,11 @@ type identityContextKey struct{}
 
 // RequestIdentity is the explicit project and actor boundary for one request.
 type RequestIdentity struct {
-	Project project.Context
-	Scope   project.Scope
-	Actor   actor.Context
-	Surface access.Surface
+	Project   project.Context
+	Scope     project.Scope
+	Actor     actor.Context
+	Surface   access.Surface
+	execution access.Execution
 }
 
 // IdentityFromContext returns the identity selected by the API surface.
@@ -44,37 +45,40 @@ func IdentityFromContext(ctx context.Context) (RequestIdentity, bool) {
 // selected by trusted route composition rather than request headers.
 func ExecutionFromContext(ctx context.Context) (access.Execution, bool) {
 	identity, ok := IdentityFromContext(ctx)
-	if !ok {
+	if !ok || identity.execution.Validate() != nil {
 		return access.Execution{}, false
 	}
-	execution, err := access.NewExecution(identity.Scope, identity.Actor, identity.Surface)
-	return execution, err == nil
+	return identity.execution, true
 }
 
 func (handler *Handler) withIdentity(surface record.Surface, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		identity := RequestIdentity{Project: handler.project, Scope: handler.executionScope}
+		var execution access.Execution
+		var err error
 		switch surface {
 		case record.SurfacePublic:
 			identity.Actor = handler.publicActor
 			identity.Surface = access.SurfacePublic
+			execution, err = access.NewPublicExecution(identity.Scope, identity.Actor)
 		case record.SurfaceAdmin:
-			authenticated, ok := authenticatedActorFromContext(request.Context())
-			if !ok || authenticated.ProjectID().String() != handler.project.ID().String() ||
-				authenticated.ActorID() != handler.adminActor.ActorID() {
+			authenticated, ok := authenticatedPrincipalFromContext(request.Context())
+			if !ok || authenticated.Actor().ProjectID().String() != handler.project.ID().String() {
 				writeError(writer, request, http.StatusForbidden, "forbidden", "administrator is outside the project boundary", nil)
 				return
 			}
-			identity.Actor = authenticated
+			identity.Actor = authenticated.Actor()
 			identity.Surface = access.SurfaceAdmin
+			execution, err = access.NewAdminExecution(identity.Scope, authenticated)
 		default:
 			writeError(writer, request, http.StatusInternalServerError, "internal_error", "internal server error", nil)
 			return
 		}
-		if _, err := access.NewExecution(identity.Scope, identity.Actor, identity.Surface); err != nil {
+		if err != nil {
 			writeError(writer, request, http.StatusInternalServerError, "internal_error", "internal server error", nil)
 			return
 		}
+		identity.execution = execution
 		ctx := context.WithValue(request.Context(), identityContextKey{}, identity)
 		next.ServeHTTP(writer, request.WithContext(ctx))
 	})

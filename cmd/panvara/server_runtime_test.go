@@ -24,6 +24,19 @@ import (
 	appmodule "github.com/shezw/panvara/internal/application/appmodule"
 )
 
+func TestServerConfigAllowsEmptyBootstrapTokenForInitializedScope(t *testing.T) {
+	t.Parallel()
+
+	config := serverConfig{
+		databaseURL:  "postgres://redacted",
+		moduleSource: "crm.yaml",
+		projectID:    "018f7e93-7b2c-7abc-8def-1234567890ab",
+	}
+	if err := config.validate(); err != nil {
+		t.Fatalf("serverConfig.validate() with no restart token = %v", err)
+	}
+}
+
 func TestReadModuleSourceIsBounded(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()

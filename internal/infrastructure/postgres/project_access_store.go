@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shezw/panvara/internal/application/access"
+	domainaccess "github.com/shezw/panvara/internal/domain/access"
 	"github.com/shezw/panvara/internal/domain/project"
 )
 
@@ -134,6 +135,57 @@ func (store *ProjectAccessStore) ScopeActive(ctx context.Context, scope project.
 	return active, nil
 }
 
+// CredentialActive reports whether the exact credential is an active
+// authentication path for the principal inside the active default scope.
+func (store *ProjectAccessStore) CredentialActive(
+	ctx context.Context,
+	scope project.Scope,
+	principalID string,
+	credentialID domainaccess.ID,
+) (bool, error) {
+	if err := scope.Validate(); err != nil {
+		return false, fmt.Errorf("read PostgreSQL API credential: %w", err)
+	}
+	principalID = strings.TrimSpace(principalID)
+	if !principalIDPattern.MatchString(principalID) {
+		return false, fmt.Errorf("read PostgreSQL API credential: invalid principal id %q", principalID)
+	}
+	if !credentialID.Valid() {
+		return false, fmt.Errorf("read PostgreSQL API credential: invalid credential id")
+	}
+
+	var active bool
+	err := store.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM panvara_api_credential AS credential
+			JOIN panvara_project AS project
+			  ON project.project_id = credential.project_id
+			JOIN panvara_environment AS environment
+			  ON environment.project_id = credential.project_id
+			 AND environment.environment_id = credential.environment_id
+			JOIN panvara_principal AS principal
+			  ON principal.project_id = credential.project_id
+			 AND principal.principal_id = credential.principal_id
+			WHERE credential.project_id = $1
+			  AND credential.environment_id = $2
+			  AND credential.credential_id = $3
+			  AND credential.principal_id = $4
+			  AND credential.status = 'active'
+			  AND credential.revoked_at IS NULL
+			  AND project.status = 'active'
+			  AND environment.status = 'active'
+			  AND environment.is_default
+			  AND principal.status = 'active'
+		)
+	`, scope.ProjectID().String(), scope.EnvironmentID().String(),
+		credentialID.String(), principalID).Scan(&active)
+	if err != nil {
+		return false, fmt.Errorf("read PostgreSQL API credential: %w", err)
+	}
+	return active, nil
+}
+
 // HasActiveGrant reports whether an active principal has the exact unrevoked
 // grant inside an active default environment.
 func (store *ProjectAccessStore) HasActiveGrant(
@@ -237,15 +289,17 @@ func (store *ProjectAccessStore) insertBootstrapScope(
 		return project.Scope{}, fmt.Errorf("insert PostgreSQL bootstrap environment: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO panvara_principal (project_id, principal_id)
-		VALUES ($1, $2)
+		INSERT INTO panvara_principal (
+			project_id, principal_id, kind, display_name
+		) VALUES ($1, $2, 'bootstrap', $2)
 	`, definition.ID().String(), principalID); err != nil {
 		return project.Scope{}, fmt.Errorf("insert PostgreSQL bootstrap principal: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO panvara_access_grant (
-			project_id, environment_id, principal_id, role
-		) VALUES ($1, $2, $3, $4)
+			project_id, environment_id, principal_id, role,
+			granted_by_principal_id, updated_at
+		) VALUES ($1, $2, $3, $4, $3, clock_timestamp())
 	`, definition.ID().String(), environmentID.String(), principalID, access.RoleProjectOwner); err != nil {
 		return project.Scope{}, fmt.Errorf("insert PostgreSQL bootstrap owner grant: %w", err)
 	}

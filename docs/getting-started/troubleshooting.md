@@ -85,13 +85,15 @@ make run-server
 
 ## 请求返回 401 Unauthorized
 
-管理接口需要 `Authorization: Bearer ...`，而且终端 B 必须加载与 Server 相同的 `.env.local`。重新加载配置，再确认请求包含：
+管理接口需要 `Authorization: Bearer ...`。首次验收时，终端 B 必须加载与 Server 初始化时相同的 `.env.local`；也可以使用仍为 active、Principal 未停用且已获 `project.owner` Grant 的 Service Credential。重新加载配置，再确认请求包含：
 
 ```sh
 -H "Authorization: Bearer ${PANVARA_ADMIN_TOKEN}"
 ```
 
 不要把 Token 直接粘贴进会提交的脚本或文档。
+
+如果 Header 正确仍返回 401，请检查 Credential 是否已撤销或 Principal 是否已停用；若返回 403，则 Credential 已通过认证，但当前作用域缺少 active `project.owner` Grant。参见[访问管理指南](../modules/access-administration.md)。
 
 ## 创建组织或邮箱返回冲突
 

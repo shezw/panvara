@@ -25,7 +25,7 @@ Profile 是部署组合，不是付费等级，也不是互相继承的产品版
 | Profile | 当前状态 | 当前用途 | 依赖 |
 | --- | --- | --- | --- |
 | `lite` | 可运行基础切片 | Core 生命周期、健康和版本验收 | 无 |
-| `server` | 可运行最小纵向切片；Server Core 未完成 | 一个 AppModule 的 HTTP API、持久化 CRUD 与 P0-01a 最小访问闭环 | PostgreSQL |
+| `server` | 可运行最小纵向切片；Server Core 未完成 | 一个 AppModule 的 HTTP API、持久化 CRUD 与 P0-01a/P0-01b 访问闭环 | PostgreSQL |
 | `manager` | 规划中 | Server + 管理控制面 | 尚不可启动 |
 | `site` | 规划中 | Website 与 Assets | 尚不可启动 |
 | `commerce` | 规划中 | Commerce 与 Payments | 尚不可启动 |
@@ -43,7 +43,7 @@ Server 额外需要：
 - 一个有效 AppModule YAML/JSON。
 - [Project Context](project-context.md) 配置。
 - [执行作用域与访问内核](project-access.md) 使用的默认 Environment Key；未设置时为 `default`。
-- 至少 32 字节、无空白字符的管理员 Token。
+- marker 尚未初始化时需要 32–1024 字节、仅含 Bearer 安全 ASCII且不以 `pvk1.` 开头的 bootstrap Token；完成后重启可省略。
 
 ## 最小示例
 
@@ -75,7 +75,7 @@ make infra-up
 make run-server
 ```
 
-首次成功启动会先持久化 Project、生成默认 Environment，并创建 `bootstrap-admin` Principal 与 `project.owner` Grant，然后输出 Profile、监听地址、模块名称和 Revision。后续相同配置重启会复用这些事实；Project/Environment 配置漂移会在监听 HTTP 前拒绝启动。另一个终端调用 Admin API 前也要加载同一份 `.env` 和 `.env.local`。
+首次成功启动会先持久化 Project、生成默认 Environment，创建 `bootstrap-admin` Principal/Owner Grant，并把 bootstrap Token 的 digest、hint 与永久 marker 原子写入 PostgreSQL。后续相同配置重启会复用这些事实；Token 可省略，相同值可核对，不同值和 Project/Environment 配置漂移都会在监听 HTTP 前拒绝启动。另一个终端调用 Admin API 前仍要加载可用 Credential。
 
 停止进程使用 `Ctrl+C`，关闭本地数据库容器使用：
 
@@ -102,11 +102,11 @@ Panvara 不会自动读取 `.env`。所有配置可使用环境变量；命令�
 | `PANVARA_PROJECT_TIME_ZONE` | `UTC` | 忽略 | 可选 |
 | `PANVARA_PROJECT_CURRENCY` | `USD` | 忽略 | 可选 |
 | `PANVARA_ENVIRONMENT_KEY` | `default` | 忽略 | 可选；当前唯一默认 Environment Key |
-| `PANVARA_ADMIN_TOKEN` | 无 | 忽略 | 必需，至少 32 字节 |
+| `PANVARA_ADMIN_TOKEN` | 无 | 忽略 | marker 不存在时必需；32–1024 字节、仅 Bearer 安全 ASCII、非 `pvk1.` 前缀；完成后可省略 |
 
 对应 CLI Flag 包括 `--profile`、`--http`、`--database-url`、`--module-source`、`--module-format`、`--project-*`、`--environment-key` 和 `--admin-token`。真实 Token 不应放在命令行，因为同机其他进程可能看到参数。
 
-Token 只把请求认证为固定 `bootstrap-admin` Principal。Admin API 是否放行由 Application 层读取持久化 Owner Grant 决定；正确 Token 在 Grant 已撤销时仍会收到 403，重启也不会补回 Grant。
+Bearer Credential 只把请求认证为一个 project-local Principal。Admin API 是否放行由 Application 层读取 active Credential/Principal 与持久化 Owner Grant 决定；Credential 无效/撤销返回 401，Grant 缺失/撤销返回 403，权威状态读取失败返回 503。重启不会复活 revoked Credential 或自动补回 Grant；Grant 只能由另一个 Owner 显式 PUT 重新授予。
 
 查看版本而不启动服务：
 
@@ -133,7 +133,7 @@ go run ./cmd/panvara --version
 5. 按[执行作用域与访问内核](project-access.md#最小示例)确认 Project、生成的默认 Environment、Principal 与 Owner Grant 已持久化。
 6. 完成 [CRM Leads](crm-leads.md) 的创建与查询。
 7. 重启 Server 后 Environment ID 与记录都保持不变。
-8. 在可丢弃环境按[访问内核验收](project-access.md#验收)撤销 Owner Grant；同一 Token 的 Admin 请求和重启后的请求都应返回 403。
+8. 在可丢弃环境按[访问管理验收](access-administration.md#验收)创建第二 Owner path，验证轮换、Credential revoke 的 401、Grant revoke 的 403、显式重新授予及 last-owner 409。
 
 ## 常见问题
 
@@ -147,7 +147,7 @@ Panvara 不自动加载文件。请按示例显式导入 `.env` 和 `.env.local`
 
 ### 为什么 Server 提示缺少 administrator token？
 
-先执行 `make local-init`，再在当前 Shell 加载 `.env.local`。仓库中的 `.env.example` 故意把 Token 留空。
+marker 尚不存在时，先执行 `make local-init`，再在当前 Shell 加载 `.env.local`。marker 已存在时可以省略 Token；如果仍提供，必须与永久 marker 的 digest 相同。
 
 ### 为什么 Token 正确，Admin API 仍返回 403？
 
@@ -169,7 +169,7 @@ Token 只完成认证。请确认持久化 Project、默认 Environment 与 `boo
 
 - Lite 不是“无数据库业务 Server”，它只提供 Core 运维端点。
 - Server 每次启动只装配一个项目和一个 AppModule。
-- P0-01a 只有固定 bootstrap Principal 与 Owner Grant，不是完整 IAM；没有账号、凭据生命周期、Membership 或动态 Role/Policy。
+- P0-01b 只有 project-local Service Principal/API Credential 与固定 Owner Grant，不是完整 IAM；没有 Account、ExternalIdentity、Session、ProjectMembership、动态 Role/Policy 或 RecordOwner。
 - 只有默认 Environment 可以执行现有用例；业务事实表尚无 `environment_id`，没有多 Environment 数据隔离。
 - 没有热重载、后台 Worker、Manager UI 或独立 Provider 进程。
 - 没有多节点配置收敛、服务发现或分布式发布控制面。
@@ -180,4 +180,4 @@ Token 只完成认证。请确认持久化 Project、默认 Environment 与 `boo
 
 Profile 名称是配置契约，但 alpha 阶段的内部组合仍可能变化。自动化脚本应检查启动退出码和 `/readyz`，不要只判断进程存在。
 
-从 Lite 切换到 Server 不会自动创建业务模型；必须显式提供数据库、AppModule、Project Context 和 Token。Migration 0004 后，某个 Project ID 第一次由 Server 装配时会创建最小持久化作用域；同一 Project ID 的后续启动要求其 Project/Environment 配置一致，并尊重已撤销 Grant。未来 Manager/Site/Commerce/Distributed 真正落地时，应同时增加本页的启动和验收步骤，并保持未实现组合 fail-fast。
+从 Lite 切换到 Server 不会自动创建业务模型；必须显式提供数据库、AppModule、Project Context，且首次 marker 初始化还必须提供 Token。Migration 0004/0005 后，同一 Project ID 的后续启动要求 Project/Environment 配置一致，并尊重 Credential/Grant 权威状态。Principal disable 与 Credential revoke 不可恢复；Grant 只接受已授权显式 PUT，restart/bootstrap 不自动恢复。未来 Manager/Site/Commerce/Distributed 真正落地时，应同时增加本页的启动和验收步骤，并保持未实现组合 fail-fast。

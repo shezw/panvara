@@ -15,9 +15,11 @@
 package postgres
 
 import (
+	"context"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	domainaccess "github.com/shezw/panvara/internal/domain/access"
 	"github.com/shezw/panvara/internal/domain/project"
 )
 
@@ -113,6 +115,17 @@ func TestProjectAccessLockIDIsStableAndProjectScoped(t *testing.T) {
 	}
 	if projectAccessLockID(first) == projectAccessLockID(second) {
 		t.Fatal("projectAccessLockID() returned the same lock for two projects")
+	}
+}
+
+func TestCredentialActiveRejectsInvalidEvidenceBeforeQuery(t *testing.T) {
+	t.Parallel()
+
+	store := &ProjectAccessStore{}
+	if active, err := store.CredentialActive(
+		context.Background(), project.Scope{}, "bootstrap-admin", domainaccess.ID{},
+	); err == nil || active {
+		t.Fatalf("CredentialActive(invalid evidence) = %t, %v", active, err)
 	}
 }
 

@@ -118,6 +118,27 @@
       ]
     },
     {
+      "id": "access-administration",
+      "name": "Project-local Access Administration",
+      "status": "P0-01b runnable slice",
+      "sourcePaths": [
+        "internal/domain/access",
+        "internal/application/access/administration.go",
+        "internal/application/access/authentication.go",
+        "internal/application/access/bootstrap.go",
+        "internal/infrastructure/postgres/access_admin_store.go",
+        "internal/interfaces/httpapi/access_handler.go",
+        "db/migrations/0005_project_access_administration.sql"
+      ],
+      "guide": "docs/modules/access-administration.md",
+      "acceptance": [
+        "make test",
+        "make test-integration",
+        "make test-server-smoke",
+        "make docs-check"
+      ]
+    },
+    {
       "id": "crm-leads",
       "name": "CRM Leads Example",
       "status": "alpha.2 reference vertical slice",

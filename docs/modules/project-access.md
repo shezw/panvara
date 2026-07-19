@@ -18,7 +18,7 @@
 
 执行作用域与访问内核负责回答两个 Server 核心问题：一次业务操作精确属于哪个 Project/Environment，以及当前 Principal 是否真的拥有执行该操作的权限。
 
-P0-01a 把 Project、默认 Environment、bootstrap Principal 和 `project.owner` Grant 持久化到 PostgreSQL。HTTP Token 只用于确认“调用者是谁”；真正的 Admin 权限由 Application 层在每次用例执行前读取持久化 Grant 决定，不再信任请求中自报的 Role。
+P0-01a 把 Project、默认 Environment、bootstrap Principal 和 `project.owner` Grant 持久化到 PostgreSQL；P0-01b 再把 Credential 认证、Service Principal 与 Grant 管理接到同一边界。HTTP Bearer 只用于确认“调用者是谁”；真正的 Admin 权限由 Application 层读取 active Principal/Credential 与持久化 Grant 决定，不再信任请求或 Provider 自报的 Role/Email。
 
 ```mermaid
 flowchart LR
@@ -32,7 +32,7 @@ flowchart LR
 
 ## 当前状态
 
-这是 **P0-01a 可运行切片**，不是完整 P0-01，也不是完整 IAM。
+这是 **P0-01a + P0-01b 可运行切片**，不是完整 P0-01，也不是完整 IAM。
 
 当前已实现：
 
@@ -43,12 +43,15 @@ flowchart LR
 - Public Surface 只可进入 Record 用例，并继续接受 AppModule 的逐资源、逐操作策略检查；Admin Surface 必须有未撤销的持久化 Owner Grant。
 - Project、默认 Environment、Principal 或 Grant 状态变化会立即影响后续请求；撤销 Grant 后重启不会偷偷恢复权限。
 - 未识别操作、非默认 Environment、跨 Project Actor、数据库授权状态读取失败均 fail closed。
+- 首次启动为 bootstrap Token 写入 digest、hint 与永久 marker；后续可省略、相同可用、改变拒绝，Credential revoked 后不会被重启复活。
+- Owner 可通过 [访问管理 API](access-administration.md)管理 Service Principal、Credential 与固定 `project.owner` Grant；Principal disable 与 Credential revoke 是终态，Grant 只允许显式重新授予。
+- 所有新增管理写操作在 PostgreSQL 事务内二次授权并写入最小安全审计；最后一个可用 Owner path 不能被移除。
 
 ## 前置条件
 
 - 使用 `server` Profile。
 - PostgreSQL 18.4 已启动。
-- 已准备合法 Project Context、AppModule 和至少 32 字节的 Admin Token。
+- 已准备合法 Project Context、AppModule 和 32–1024 字节、仅含 Bearer 安全 ASCII、非 `pvk1.` 前缀的 bootstrap Token。
 - 当前 Shell 已加载 `.env` 与 `.env.local`。
 
 第一次运行建议使用仓库提供的初始化命令：
@@ -85,7 +88,7 @@ docker compose -f deploy/compose/compose.yaml exec -T postgres \
   "SELECT principal_id, role, revoked_at FROM panvara_access_grant;"
 ```
 
-应看到一个默认 Environment，以及 `bootstrap-admin` 的未撤销 `project.owner` Grant。数据库中不会保存 Admin Token 或 Token 摘要；当前 Token 认证仍是进程内 bootstrap 机制。
+应看到一个默认 Environment，以及 `bootstrap-admin` 的未撤销 `project.owner` Grant。数据库不会保存原始 Admin Token，但会保存 SHA-256 digest、非敏感 hint、Credential 元数据与永久 bootstrap marker。不要查询或输出 digest；验收 Credential 生命周期应使用[Project-local 访问管理指南](access-administration.md)。
 
 ## 配置
 
@@ -97,51 +100,20 @@ docker compose -f deploy/compose/compose.yaml exec -T postgres \
 | `PANVARA_PROJECT_TIME_ZONE` | `UTC` | 创建默认 IANA Time Zone | 同一 Project ID 内漂移时拒绝启动 |
 | `PANVARA_PROJECT_CURRENCY` | `USD` | 创建默认 Currency | 同一 Project ID 内漂移时拒绝启动 |
 | `PANVARA_ENVIRONMENT_KEY` | `default` | 创建该 Project 唯一的默认 Environment Key | 同一 Project ID 内漂移时拒绝启动 |
-| `PANVARA_ADMIN_TOKEN` | 无 | 将请求认证为 `bootstrap-admin` | 不持久化；Grant 才决定权限 |
+| `PANVARA_ADMIN_TOKEN` | 无 | marker 不存在时创建 digest-only bootstrap Credential；32–1024 字节、仅 Bearer 安全 ASCII、非 `pvk1.` 前缀 | marker 存在后可省略，相同可核对，不同值拒绝；不会恢复 revoked Credential |
 
-启动配置只在某个 Project ID 首次初始化时提供定义。之后数据库事实是该 Project 权限与身份的权威来源，Server 不会用配置静默覆盖已存在的设置，也不会在发现 Grant 缺失或已撤销时自动补回。使用新的 Project ID 和新的唯一 Project Key 会显式创建另一套 Project 事实，而不是修改或迁移原 Project。
+启动配置只在某个 Project ID 首次初始化时提供定义。之后数据库事实是该 Project 权限与身份的权威来源，Server 不会用配置静默覆盖已存在的设置，也不会在发现 Grant 缺失或已撤销时自动补回。Grant 只能由仍有权限的 Owner 显式 PUT 重新授予。使用新的 Project ID 和新的唯一 Project Key 会显式创建另一套 Project 事实，而不是修改或迁移原 Project。
 
 ## 验收
 
-先完成 [CRM Leads 完整验收](../getting-started/crm-leads-acceptance.md) 中的 Admin 读取，确认返回 200。然后在测试环境撤销 Grant：
+先完成 [CRM Leads 完整验收](../getting-started/crm-leads-acceptance.md) 中的 Admin 读取，确认返回 200。然后按 [Project-local 访问管理验收](access-administration.md#验收)创建第二个 Owner path，以管理 API 撤销其中一个 Grant，并验证：
 
-```bash
-docker compose -f deploy/compose/compose.yaml exec -T postgres \
-  psql -U panvara -d panvara -v project_id="$PANVARA_PROJECT_ID" <<'SQL'
-UPDATE panvara_access_grant AS grant_row
-SET revoked_at = clock_timestamp()
-WHERE grant_row.project_id = :'project_id'::uuid
-  AND grant_row.environment_id = (
-    SELECT environment_id
-    FROM panvara_environment
-    WHERE project_id = :'project_id'::uuid AND is_default
-  )
-  AND grant_row.principal_id = 'bootstrap-admin'
-  AND grant_row.role = 'project.owner'
-  AND grant_row.revoked_at IS NULL;
-SQL
-```
+- 被撤权 Credential 的认证仍可成功，但 Admin 用例返回 403。
+- Server 重启不会自动补回 revoked/missing Grant。
+- 另一个仍有效 Owner 可通过显式 PUT 重新授予，恢复后无需重启即返回 200。
+- 尝试停用、撤销或撤权最后一个可用 Owner path 返回 409 `last_owner_path`，事务不留下半状态。
 
-再次使用同一 Token 调用 Admin API，应返回 403；重启 Server 后仍应返回 403。恢复本地验收权限：
-
-```bash
-docker compose -f deploy/compose/compose.yaml exec -T postgres \
-  psql -U panvara -d panvara -v project_id="$PANVARA_PROJECT_ID" <<'SQL'
-UPDATE panvara_access_grant AS grant_row
-SET revoked_at = NULL
-WHERE grant_row.project_id = :'project_id'::uuid
-  AND grant_row.environment_id = (
-    SELECT environment_id
-    FROM panvara_environment
-    WHERE project_id = :'project_id'::uuid AND is_default
-  )
-  AND grant_row.principal_id = 'bootstrap-admin'
-  AND grant_row.role = 'project.owner'
-  AND grant_row.revoked_at IS NOT NULL;
-SQL
-```
-
-无需重启，下一次 Admin 请求应恢复为 200。不要在生产数据库直接使用以上恢复命令；P0-01a 尚未提供正式 Grant 管理 API，生产操作需要受控 SQL 变更、审计和备份。
+不要直接 UPDATE 授权表来模拟正常管理流程；它会绕过 Application 授权、last-owner 防护与安全审计。
 
 开发者可运行完整自动验收：
 
@@ -150,13 +122,13 @@ make test-integration
 make test-server-smoke
 ```
 
-测试覆盖首次初始化、并发初始化、幂等重启、配置漂移、状态停用、非默认 Environment 拒绝、Grant 撤销与恢复，以及重启不恢复已撤销权限。
+测试覆盖首次初始化、digest/marker 幂等重启与冲突、配置漂移、状态停用、非默认 Environment 拒绝、Credential/Grant 管理、显式重新授予、last-owner 防护，以及重启不恢复 revoked/missing 权限。
 
 ## 常见问题
 
 ### 为什么 Token 正确仍返回 403？
 
-Token 只证明请求对应 `bootstrap-admin`。Project、默认 Environment、Principal 必须都是 active，且精确 `(project_id, environment_id, principal_id, project.owner)` Grant 未撤销。任一条件不成立都会拒绝。
+Bearer 只证明请求对应一个 project-local Principal。Project、默认 Environment、Principal 与 Credential 必须都是 active，且精确 `(project_id, environment_id, principal_id, project.owner)` Grant 未撤销。Credential 问题返回 401；Grant 问题返回 403；权威存储不可用返回 503。
 
 ### 可以在请求里声明自己是 Owner 吗？
 
@@ -182,15 +154,15 @@ Public 是业务表面，不是管理表面。Access Kernel 只允许它进入 R
 
 - 只有一个由启动配置创建的默认 Environment，没有 Environment CRUD 或切换 API。
 - 已有业务事实仍按 Project 隔离，尚未按 Environment 隔离。
-- 只有固定 `bootstrap-admin` Principal 和固定 `project.owner` Role，没有 Account、Membership、动态 Role/Policy 或 Record Owner。
-- Admin Token 仍是进程内 bootstrap 认证，没有数据库 Credential 生命周期、轮换、会话、密码、OIDC、Google、Facebook 或微信登录。
+- 只有 bootstrap/Service Principal、API Credential 和固定 `project.owner` Role，没有 Account、ExternalIdentity、Session、ProjectMembership、动态 Role/Policy 或 RecordOwner。
+- Credential 支持一次性签发、显式轮换与 revoke，但没有到期、MFA、密码或 Google/Apple/Facebook/微信登录。
 - Release、Migration 和 Provider 用例尚未实现，因此也未接入 Access Kernel。
 - 每次授权读取 PostgreSQL；缓存、失效协议和高并发压测将在真实瓶颈出现后设计。
-- 没有面向用户的 Grant 管理 API；直接 SQL 只用于本地验收和受控恢复。
+- Grant 管理只支持固定 `project.owner`，没有动态角色、列表分页或生产级恢复工作流。
 
 ## 兼容与升级
 
-Migration `0004_project_environment_access.sql` 只新增表和约束，不改写 `0001`–`0003` 的既有事实。升级后，当前配置的 Project ID 第一次由 Server 装配时会创建持久化 Project、默认 Environment、Principal 和 Grant；该 Project 的 Environment ID 随后保持稳定。
+Migration `0004_project_environment_access.sql` 新增持久化作用域；`0005_project_access_administration.sql` 扩展 Principal/Grant 并新增 API Credential、永久 marker 和最小 append-only security audit。升级后，当前 Project 首次完成 `0005` 初始化仍需原 bootstrap Token；marker 成功创建后可在后续启动省略。相同 Token 可核对，不同 Token 拒绝，revoked Credential 不会复活。
 
 现有 Record、Revision 与 Draft 数据被解释为属于该 Project 的默认 Environment，但表中尚无可验证的 Environment 身份。未来支持真正多 Environment 时，必须先设计 `environment_id` 回填、复合键/唯一约束、分页游标、幂等键和升级回滚测试，不能仅增加路由参数。
 

@@ -19,6 +19,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -109,6 +111,33 @@ type integrationPlan struct {
 	} `json:"effects"`
 }
 
+type integrationAccessPrincipal struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type integrationAccessCredential struct {
+	ID          string `json:"id"`
+	PrincipalID string `json:"principal_id"`
+	Hint        string `json:"hint"`
+	Status      string `json:"status"`
+}
+
+type integrationIssuedCredential struct {
+	Credential integrationAccessCredential `json:"credential"`
+	Token      string                      `json:"token"`
+}
+
+type integrationCredentialList struct {
+	Data []integrationAccessCredential `json:"data"`
+}
+
+type integrationOwnerGrant struct {
+	PrincipalID string `json:"principal_id"`
+	Role        string `json:"role"`
+	Active      bool   `json:"active"`
+}
+
 func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -120,10 +149,36 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		environmentKey: "default",
 		adminToken:     testIntegrationAdminToken,
 	}
+	for index, invalidToken := range []string{
+		strings.Repeat("a", 31) + ",",
+		strings.Repeat("a", 31) + "\x7f",
+	} {
+		invalidBootstrapConfig := config
+		invalidBootstrapConfig.projectID = fmt.Sprintf(
+			"01981234-5678-7abc-8def-0123456789a%c", 'c'+rune(index),
+		)
+		invalidBootstrapConfig.projectKey = fmt.Sprintf("invalid-bootstrap-%d", index)
+		invalidBootstrapConfig.adminToken = invalidToken
+		invalidApplication, invalidError := buildServerApplication(ctx, invalidBootstrapConfig)
+		if invalidApplication != nil {
+			invalidApplication.Close()
+		}
+		if invalidError == nil || !strings.Contains(invalidError.Error(), "invalid bootstrap token") ||
+			strings.Contains(invalidError.Error(), invalidToken) {
+			t.Fatalf("buildServerApplication(non-Bearer bootstrap token %d) error = %v", index, invalidError)
+		}
+	}
 
 	application, server, baseURL := startIntegrationServer(t, ctx, config)
 	client := &http.Client{Timeout: 5 * time.Second}
 	assertIntegrationStatus(t, client, http.MethodGet, baseURL+"/readyz", "", "", "", http.StatusOK, nil)
+	assertIntegrationStatus(
+		t, client, http.MethodPost,
+		baseURL+"/api/admin/core/v1alpha1/access/principals",
+		testIntegrationAdminToken,
+		`{"display_name":"first","diſplay_name":"must-not-override"}`,
+		"", http.StatusBadRequest, nil,
+	)
 	artifact := assertIntegrationStatus(
 		t, client, http.MethodGet,
 		baseURL+"/api/core/v1alpha1/modules/crm.leads/openapi.json",
@@ -423,37 +478,102 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		t.Fatalf("PATCH ETag = %q", patchResponse.Header.Get("ETag"))
 	}
 
-	setBootstrapOwnerGrantRevoked(t, ctx, databaseURL, config.projectID, true)
-	assertIntegrationStatus(
-		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+	servicePrincipal := createIntegrationServicePrincipal(
+		t, client, baseURL, testIntegrationAdminToken, "Server smoke worker",
+	)
+	serviceCredential := issueIntegrationCredential(
+		t, client, baseURL, testIntegrationAdminToken, servicePrincipal.ID, "server smoke key",
 	)
 	assertIntegrationStatus(
 		t, client, http.MethodGet,
-		baseURL+"/api/admin/core/v1alpha1/modules/crm.leads/revisions?limit=100",
-		testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+		baseURL+"/api/admin/core/v1alpha1/access/principals",
+		serviceCredential.Token, "", "", http.StatusForbidden, nil,
 	)
 	assertIntegrationStatus(
-		t, client, http.MethodGet, baseURL+draftItemPath,
-		testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+		t, client, http.MethodGet, itemPath, serviceCredential.Token, "", "", http.StatusForbidden, nil,
 	)
+	grant := mutateIntegrationOwnerGrant(
+		t, client, http.MethodPut, baseURL, testIntegrationAdminToken, servicePrincipal.ID,
+	)
+	if !grant.Active || grant.Role != "project.owner" {
+		t.Fatalf("granted service owner = %#v", grant)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, serviceCredential.Token, "", "", http.StatusOK, nil,
+	)
+	grant = mutateIntegrationOwnerGrant(
+		t, client, http.MethodDelete, baseURL, testIntegrationAdminToken, servicePrincipal.ID,
+	)
+	if grant.Active {
+		t.Fatalf("revoked service owner = %#v", grant)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, serviceCredential.Token, "", "", http.StatusForbidden, nil,
+	)
+	grant = mutateIntegrationOwnerGrant(
+		t, client, http.MethodPut, baseURL, testIntegrationAdminToken, servicePrincipal.ID,
+	)
+	if !grant.Active {
+		t.Fatalf("explicitly re-granted service owner = %#v", grant)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, serviceCredential.Token, "", "", http.StatusOK, nil,
+	)
+	grant = mutateIntegrationOwnerGrant(
+		t, client, http.MethodDelete, baseURL, testIntegrationAdminToken, servicePrincipal.ID,
+	)
+	if grant.Active {
+		t.Fatalf("second revoked service owner = %#v", grant)
+	}
 	stopIntegrationServer(t, server, application)
 	application, server, baseURL = startIntegrationServer(t, ctx, config)
 	itemPath = baseURL + "/api/admin/v1alpha1/crm.leads/lead/" + lead.ID
 	assertIntegrationStatus(
-		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
+		t, client, http.MethodGet, itemPath, serviceCredential.Token, "", "", http.StatusForbidden, nil,
 	)
-	assertIntegrationStatus(
-		t, client, http.MethodGet,
-		baseURL+"/api/admin/core/v1alpha1/modules/crm.leads/revisions?limit=100",
-		testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
-	)
-	assertIntegrationStatus(
-		t, client, http.MethodGet, baseURL+draftItemPath,
-		testIntegrationAdminToken, "", "", http.StatusForbidden, nil,
-	)
-	setBootstrapOwnerGrantRevoked(t, ctx, databaseURL, config.projectID, false)
 	assertIntegrationStatus(
 		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	revokedCredentialResponse := assertIntegrationStatus(
+		t, client, http.MethodPost,
+		baseURL+"/api/admin/core/v1alpha1/access/credentials/"+serviceCredential.Credential.ID+"/revoke",
+		testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	var revokedCredential integrationAccessCredential
+	if err := json.Unmarshal(revokedCredentialResponse.Body, &revokedCredential); err != nil {
+		t.Fatal(err)
+	}
+	if revokedCredential.Status != "revoked" {
+		t.Fatalf("revoked service credential = %#v", revokedCredential)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, serviceCredential.Token, "", "", http.StatusUnauthorized, nil,
+	)
+	disabledPrincipal := createIntegrationServicePrincipal(
+		t, client, baseURL, testIntegrationAdminToken, "Disabled smoke worker",
+	)
+	disabledCredential := issueIntegrationCredential(
+		t, client, baseURL, testIntegrationAdminToken, disabledPrincipal.ID, "disable test key",
+	)
+	mutateIntegrationOwnerGrant(
+		t, client, http.MethodPut, baseURL, testIntegrationAdminToken, disabledPrincipal.ID,
+	)
+	assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, disabledCredential.Token, "", "", http.StatusOK, nil,
+	)
+	disabledResponse := assertIntegrationStatus(
+		t, client, http.MethodPost,
+		baseURL+"/api/admin/core/v1alpha1/access/principals/"+url.PathEscape(disabledPrincipal.ID)+"/disable",
+		testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	if err := json.Unmarshal(disabledResponse.Body, &disabledPrincipal); err != nil {
+		t.Fatal(err)
+	}
+	if disabledPrincipal.Status != "disabled" {
+		t.Fatalf("disabled service principal = %#v", disabledPrincipal)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, disabledCredential.Token, "", "", http.StatusUnauthorized, nil,
 	)
 	stopIntegrationServer(t, server, application)
 
@@ -583,7 +703,230 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	assertIntegrationStatus(
 		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusNotFound, nil,
 	)
+
+	rotationPrincipal := createIntegrationServicePrincipal(
+		t, client, baseURL, testIntegrationAdminToken, "Bootstrap replacement worker",
+	)
+	rotationCredential := issueIntegrationCredential(
+		t, client, baseURL, testIntegrationAdminToken, rotationPrincipal.ID, "replacement owner key",
+	)
+	mutateIntegrationOwnerGrant(
+		t, client, http.MethodPut, baseURL, testIntegrationAdminToken, rotationPrincipal.ID,
+	)
+	accessPrincipalsPath := baseURL + "/api/admin/core/v1alpha1/access/principals"
+	assertIntegrationStatus(
+		t, client, http.MethodGet, accessPrincipalsPath,
+		rotationCredential.Token, "", "", http.StatusOK, nil,
+	)
+	bootstrapCredentialsResponse := assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/admin/core/v1alpha1/access/principals/bootstrap-admin/credentials",
+		rotationCredential.Token, "", "", http.StatusOK, nil,
+	)
+	var bootstrapCredentials integrationCredentialList
+	if err := json.Unmarshal(bootstrapCredentialsResponse.Body, &bootstrapCredentials); err != nil {
+		t.Fatal(err)
+	}
+	if len(bootstrapCredentials.Data) != 1 || bootstrapCredentials.Data[0].Status != "active" {
+		t.Fatalf("bootstrap credentials before rotation = %#v", bootstrapCredentials)
+	}
+	bootstrapCredentialID := bootstrapCredentials.Data[0].ID
+	bootstrapRevoke := assertIntegrationStatus(
+		t, client, http.MethodPost,
+		baseURL+"/api/admin/core/v1alpha1/access/credentials/"+bootstrapCredentialID+"/revoke",
+		rotationCredential.Token, "", "", http.StatusOK, nil,
+	)
+	var revokedBootstrap integrationAccessCredential
+	if err := json.Unmarshal(bootstrapRevoke.Body, &revokedBootstrap); err != nil {
+		t.Fatal(err)
+	}
+	if revokedBootstrap.Status != "revoked" {
+		t.Fatalf("revoked bootstrap credential = %#v", revokedBootstrap)
+	}
+	bootstrapUnauthorized := assertIntegrationStatus(
+		t, client, http.MethodGet, accessPrincipalsPath,
+		testIntegrationAdminToken, "", "", http.StatusUnauthorized, nil,
+	)
+	if bytes.Contains(bootstrapUnauthorized.Body, []byte(testIntegrationAdminToken)) {
+		t.Fatalf("bootstrap authentication error leaked token: %s", bootstrapUnauthorized.Body)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodGet, accessPrincipalsPath,
+		rotationCredential.Token, "", "", http.StatusOK, nil,
+	)
+	lastPathResponses := []integrationResponse{
+		assertIntegrationStatus(
+			t, client, http.MethodPost,
+			baseURL+"/api/admin/core/v1alpha1/access/credentials/"+
+				rotationCredential.Credential.ID+"/revoke",
+			rotationCredential.Token, "", "", http.StatusConflict, nil,
+		),
+		assertIntegrationStatus(
+			t, client, http.MethodDelete,
+			baseURL+"/api/admin/core/v1alpha1/access/principals/"+
+				url.PathEscape(rotationPrincipal.ID)+"/grants/project.owner",
+			rotationCredential.Token, "", "", http.StatusConflict, nil,
+		),
+		assertIntegrationStatus(
+			t, client, http.MethodPost,
+			baseURL+"/api/admin/core/v1alpha1/access/principals/"+
+				url.PathEscape(rotationPrincipal.ID)+"/disable",
+			rotationCredential.Token, "", "", http.StatusConflict, nil,
+		),
+	}
+	for _, response := range lastPathResponses {
+		if bytes.Contains(response.Body, []byte(rotationCredential.Token)) ||
+			bytes.Contains(response.Body, []byte(testIntegrationAdminToken)) {
+			t.Fatalf("last-owner-path response leaked token: %s", response.Body)
+		}
+	}
+
+	securityPool, err := panvarapg.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open PostgreSQL for access security assertions: %v", err)
+	}
+	var storedDigest []byte
+	if err := securityPool.QueryRow(ctx, `
+		SELECT secret_digest
+		FROM panvara_api_credential
+		WHERE project_id = $1 AND credential_id = $2
+	`, config.projectID, rotationCredential.Credential.ID).Scan(&storedDigest); err != nil {
+		securityPool.Close()
+		t.Fatalf("read persisted credential digest: %v", err)
+	}
+	wantDigest := sha256.Sum256([]byte(rotationCredential.Token))
+	if !bytes.Equal(storedDigest, wantDigest[:]) || bytes.Contains(storedDigest, []byte(rotationCredential.Token)) {
+		securityPool.Close()
+		t.Fatal("persisted credential is not the expected irreversible SHA-256 digest")
+	}
+	digestBearer := "pvk1." + rotationCredential.Credential.ID + "." +
+		base64.RawURLEncoding.EncodeToString(storedDigest)
+	digestRejected := assertIntegrationStatus(
+		t, client, http.MethodGet, accessPrincipalsPath,
+		digestBearer, "", "", http.StatusUnauthorized, nil,
+	)
+	if bytes.Contains(digestRejected.Body, storedDigest) || bytes.Contains(digestRejected.Body, []byte(digestBearer)) {
+		securityPool.Close()
+		t.Fatalf("digest authentication error leaked credential material: %s", digestRejected.Body)
+	}
+	var leakedFacts int
+	if err := securityPool.QueryRow(ctx, `
+		SELECT
+		  (SELECT count(*) FROM panvara_api_credential
+		   WHERE label = $1 OR secret_hint = $1 OR principal_id = $1) +
+		  (SELECT count(*) FROM panvara_access_bootstrap_marker
+		   WHERE secret_hint = $1 OR principal_id = $1) +
+		  (SELECT count(*) FROM panvara_security_audit_event
+		   WHERE request_id = $1 OR action = $1 OR target_kind = $1
+		      OR target_id = $1 OR reason_code = $1)
+	`, rotationCredential.Token).Scan(&leakedFacts); err != nil {
+		securityPool.Close()
+		t.Fatalf("scan access facts for raw token: %v", err)
+	}
+	if leakedFacts != 0 {
+		securityPool.Close()
+		t.Fatalf("raw issued token leaked into %d persisted access facts", leakedFacts)
+	}
+	var deniedAuditCount int
+	if err := securityPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM panvara_security_audit_event
+		WHERE project_id = $1 AND actor_principal_id = $2
+		  AND action = 'access.principal.list'
+		  AND outcome = 'denied' AND reason_code = 'forbidden'
+	`, config.projectID, servicePrincipal.ID).Scan(&deniedAuditCount); err != nil {
+		securityPool.Close()
+		t.Fatalf("read denied access audit: %v", err)
+	}
+	if deniedAuditCount < 1 {
+		securityPool.Close()
+		t.Fatal("authenticated denied access administration attempt was not audited")
+	}
+	if _, err := securityPool.Exec(ctx, `
+		UPDATE panvara_project
+		SET status = 'disabled', updated_at = clock_timestamp()
+		WHERE project_id = $1
+	`, config.projectID); err != nil {
+		securityPool.Close()
+		t.Fatalf("disable project for inactive-scope HTTP assertion: %v", err)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodGet, accessPrincipalsPath,
+		rotationCredential.Token, "", "", http.StatusForbidden, nil,
+	)
+	var inactiveScopeAuditCount int
+	if err := securityPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM panvara_security_audit_event
+		WHERE project_id = $1 AND actor_principal_id = $2
+		  AND action = 'access.principal.list'
+		  AND outcome = 'denied' AND reason_code = 'scope_inactive'
+	`, config.projectID, rotationPrincipal.ID).Scan(&inactiveScopeAuditCount); err != nil {
+		securityPool.Close()
+		t.Fatalf("read inactive-scope access audit: %v", err)
+	}
+	if inactiveScopeAuditCount < 1 {
+		securityPool.Close()
+		t.Fatal("inactive-scope access denial was not audited")
+	}
+	if _, err := securityPool.Exec(ctx, `
+		UPDATE panvara_project
+		SET status = 'active', updated_at = clock_timestamp()
+		WHERE project_id = $1
+	`, config.projectID); err != nil {
+		securityPool.Close()
+		t.Fatalf("restore project after inactive-scope HTTP assertion: %v", err)
+	}
+	assertIntegrationStatus(
+		t, client, http.MethodGet, accessPrincipalsPath,
+		rotationCredential.Token, "", "", http.StatusOK, nil,
+	)
+	securityPool.Close()
 	stopIntegrationServer(t, server, application)
+
+	restartWithoutToken := config
+	restartWithoutToken.adminToken = ""
+	application, server, baseURL = startIntegrationServer(t, ctx, restartWithoutToken)
+	accessPrincipalsPath = baseURL + "/api/admin/core/v1alpha1/access/principals"
+	assertIntegrationStatus(
+		t, client, http.MethodGet, accessPrincipalsPath,
+		rotationCredential.Token, "", "", http.StatusOK, nil,
+	)
+	assertIntegrationStatus(
+		t, client, http.MethodGet, accessPrincipalsPath,
+		testIntegrationAdminToken, "", "", http.StatusUnauthorized, nil,
+	)
+	bootstrapCredentialsResponse = assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/admin/core/v1alpha1/access/principals/bootstrap-admin/credentials",
+		rotationCredential.Token, "", "", http.StatusOK, nil,
+	)
+	bootstrapCredentials = integrationCredentialList{}
+	if err := json.Unmarshal(bootstrapCredentialsResponse.Body, &bootstrapCredentials); err != nil {
+		t.Fatal(err)
+	}
+	if len(bootstrapCredentials.Data) != 1 || bootstrapCredentials.Data[0].Status != "revoked" ||
+		bootstrapCredentials.Data[0].ID != bootstrapCredentialID {
+		t.Fatalf("bootstrap credential resurrected after restart = %#v", bootstrapCredentials)
+	}
+	application.Close()
+	assertIntegrationStatus(
+		t, client, http.MethodGet, accessPrincipalsPath,
+		rotationCredential.Token, "", "", http.StatusServiceUnavailable, nil,
+	)
+	stopIntegrationServer(t, server, application)
+
+	driftedCredentialConfig := config
+	driftedCredentialConfig.adminToken = "changed-bootstrap-token-must-not-replace-existing"
+	driftedApplication, driftedError := buildServerApplication(ctx, driftedCredentialConfig)
+	if driftedApplication != nil {
+		driftedApplication.Close()
+	}
+	if driftedError == nil || !strings.Contains(driftedError.Error(), "conflict") ||
+		strings.Contains(driftedError.Error(), driftedCredentialConfig.adminToken) ||
+		strings.Contains(driftedError.Error(), testIntegrationAdminToken) {
+		t.Fatalf("changed bootstrap credential error = %v", driftedError)
+	}
 
 	pool, err := panvarapg.Open(ctx, databaseURL)
 	if err != nil {
@@ -615,45 +958,96 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	}
 }
 
-func setBootstrapOwnerGrantRevoked(
+const testIntegrationAdminToken = "panvara-integration-admin-token-32-bytes"
+
+func createIntegrationServicePrincipal(
 	t *testing.T,
-	ctx context.Context,
-	databaseURL string,
-	projectID string,
-	revoked bool,
-) {
+	client *http.Client,
+	baseURL string,
+	ownerToken string,
+	displayName string,
+) integrationAccessPrincipal {
 	t.Helper()
-	pool, err := panvarapg.Open(ctx, databaseURL)
-	if err != nil {
-		t.Fatalf("open PostgreSQL to change bootstrap owner grant: %v", err)
+	response := assertIntegrationStatus(
+		t, client, http.MethodPost,
+		baseURL+"/api/admin/core/v1alpha1/access/principals",
+		ownerToken, fmt.Sprintf(`{"display_name":%q}`, displayName), "",
+		http.StatusCreated, nil,
+	)
+	if response.Header.Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("create Principal Cache-Control = %q", response.Header.Get("Cache-Control"))
 	}
-	defer pool.Close()
-	var command string
-	if revoked {
-		command = `
-			UPDATE panvara_access_grant
-			SET revoked_at = clock_timestamp()
-			WHERE project_id = $1 AND principal_id = 'bootstrap-admin'
-			  AND role = 'project.owner' AND revoked_at IS NULL
-		`
-	} else {
-		command = `
-			UPDATE panvara_access_grant
-			SET revoked_at = NULL
-			WHERE project_id = $1 AND principal_id = 'bootstrap-admin'
-			  AND role = 'project.owner' AND revoked_at IS NOT NULL
-		`
+	var principal integrationAccessPrincipal
+	if err := json.Unmarshal(response.Body, &principal); err != nil {
+		t.Fatal(err)
 	}
-	result, err := pool.Exec(ctx, command, projectID)
-	if err != nil {
-		t.Fatalf("change bootstrap owner grant revoked=%t: %v", revoked, err)
+	if !strings.HasPrefix(principal.ID, "svc:") || principal.Status != "active" {
+		t.Fatalf("created service principal = %#v", principal)
 	}
-	if result.RowsAffected() != 1 {
-		t.Fatalf("change bootstrap owner grant revoked=%t affected %d rows, want 1", revoked, result.RowsAffected())
-	}
+	return principal
 }
 
-const testIntegrationAdminToken = "panvara-integration-admin-token-32-bytes"
+func issueIntegrationCredential(
+	t *testing.T,
+	client *http.Client,
+	baseURL string,
+	ownerToken string,
+	principalID string,
+	label string,
+) integrationIssuedCredential {
+	t.Helper()
+	path := baseURL + "/api/admin/core/v1alpha1/access/principals/" +
+		url.PathEscape(principalID) + "/credentials"
+	response := assertIntegrationStatus(
+		t, client, http.MethodPost, path, ownerToken,
+		fmt.Sprintf(`{"label":%q}`, label), "", http.StatusCreated, nil,
+	)
+	if response.Header.Get("Cache-Control") != "private, no-store" ||
+		response.Header.Get("Pragma") != "no-cache" {
+		t.Fatalf("issue Credential cache headers = %#v", response.Header)
+	}
+	var issued integrationIssuedCredential
+	if err := json.Unmarshal(response.Body, &issued); err != nil {
+		t.Fatal(err)
+	}
+	if issued.Credential.PrincipalID != principalID || issued.Credential.Status != "active" ||
+		issued.Credential.Hint == "" || !strings.HasPrefix(issued.Token, "pvk1.") ||
+		bytes.Count(response.Body, []byte(issued.Token)) != 1 {
+		t.Fatalf("issued service credential = %#v", issued)
+	}
+	listed := assertIntegrationStatus(
+		t, client, http.MethodGet, path, ownerToken, "", "", http.StatusOK, nil,
+	)
+	if bytes.Contains(listed.Body, []byte(issued.Token)) || bytes.Contains(listed.Body, []byte(`"token"`)) {
+		t.Fatalf("credential list leaked one-time token: %s", listed.Body)
+	}
+	return issued
+}
+
+func mutateIntegrationOwnerGrant(
+	t *testing.T,
+	client *http.Client,
+	method string,
+	baseURL string,
+	ownerToken string,
+	principalID string,
+) integrationOwnerGrant {
+	t.Helper()
+	response := assertIntegrationStatus(
+		t, client, method,
+		baseURL+"/api/admin/core/v1alpha1/access/principals/"+
+			url.PathEscape(principalID)+"/grants/project.owner",
+		ownerToken, "", "", http.StatusOK, nil,
+	)
+	var grant integrationOwnerGrant
+	if err := json.Unmarshal(response.Body, &grant); err != nil {
+		t.Fatal(err)
+	}
+	if grant.PrincipalID != principalID || grant.Role != "project.owner" {
+		t.Fatalf("owner grant response = %#v", grant)
+	}
+	return grant
+}
 
 type integrationResponse struct {
 	Header http.Header

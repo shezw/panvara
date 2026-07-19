@@ -60,7 +60,7 @@ Registry 不增加新的环境变量。它沿用当前 Server 的：
 
 - `PANVARA_PROJECT_ID`：登记和读取的项目边界；
 - `PANVARA_MODULE_SOURCE`、`PANVARA_MODULE_FORMAT`：启动时编译并登记的 Source；
-- `PANVARA_ADMIN_TOKEN`：只读管理接口的 bootstrap owner 认证。
+- `PANVARA_ADMIN_TOKEN`：示例使用的首启 bootstrap Credential；任何 active Principal + active Credential + active `project.owner` Grant 组合都可访问该管理接口。
 
 List 只接受一个可选 `limit`，范围 1–100、默认 20；不支持 cursor 或其他查询参数。Detail 返回且仅返回：`module`、`revision`、`module_version`、`data_schema_identities`、`spec_version`、`ir_format`、`source_format`、`source_hash`、`origin`、`registered_by`、`registered_at`。
 

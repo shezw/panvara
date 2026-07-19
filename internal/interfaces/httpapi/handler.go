@@ -25,6 +25,7 @@ import (
 	"github.com/shezw/panvara/internal/application/access"
 	appmodule "github.com/shezw/panvara/internal/application/appmodule"
 	"github.com/shezw/panvara/internal/application/record"
+	domainaccess "github.com/shezw/panvara/internal/domain/access"
 	"github.com/shezw/panvara/internal/domain/actor"
 	domainmodule "github.com/shezw/panvara/internal/domain/appmodule"
 	"github.com/shezw/panvara/internal/domain/project"
@@ -55,32 +56,53 @@ type RecordService interface {
 	Delete(context.Context, access.Execution, record.Scope, record.ID, uint64) (record.Record, error)
 }
 
+// AdminAuth authenticates one admin request and injects trusted credential
+// evidence before the identity and Application authorization boundaries run.
+type AdminAuth interface {
+	Middleware(http.Handler) http.Handler
+}
+
+// AccessAdministration is the project-local Principal, Credential, and
+// project.owner lifecycle boundary consumed by HTTP.
+type AccessAdministration interface {
+	ListPrincipals(context.Context, access.Invocation) ([]domainaccess.Principal, error)
+	CreatePrincipal(context.Context, access.Invocation, access.CreatePrincipalInput) (domainaccess.Principal, error)
+	DisablePrincipal(context.Context, access.Invocation, string) (domainaccess.Principal, error)
+	ListCredentials(context.Context, access.Invocation, string) ([]domainaccess.Credential, error)
+	IssueCredential(context.Context, access.Invocation, access.IssueCredentialInput) (access.IssuedCredential, error)
+	RevokeCredential(context.Context, access.Invocation, domainaccess.ID) (domainaccess.Credential, error)
+	ListProjectOwners(context.Context, access.Invocation) ([]domainaccess.OwnerGrant, error)
+	GrantProjectOwner(context.Context, access.Invocation, string) (domainaccess.OwnerGrant, error)
+	RevokeProjectOwner(context.Context, access.Invocation, string) (domainaccess.OwnerGrant, error)
+}
+
 // Config contains the complete single-project composition for one API router.
-// Actor contexts are explicit even though alpha.2 only ships anonymous public
-// access and one bootstrap project owner.
+// Public identity is explicit; admin identity is resolved dynamically from a
+// persisted bootstrap or service credential on every request.
 type Config struct {
-	Project     project.Context
-	Scope       project.Scope
-	PublicActor actor.Context
-	Module      Module
-	Records     RecordService
-	Revisions   RevisionRegistryService
-	Drafts      DraftWorkflowService
-	AdminAuth   *BootstrapAdminAuth
+	Project              project.Context
+	Scope                project.Scope
+	PublicActor          actor.Context
+	Module               Module
+	Records              RecordService
+	Revisions            RevisionRegistryService
+	Drafts               DraftWorkflowService
+	AdminAuth            AdminAuth
+	AccessAdministration AccessAdministration
 }
 
 // Handler exposes generated schema and record APIs for one compiled module.
 type Handler struct {
-	project        project.Context
-	executionScope project.Scope
-	publicActor    actor.Context
-	adminActor     actor.Context
-	module         Module
-	records        RecordService
-	revisions      RevisionRegistryService
-	drafts         DraftWorkflowService
-	resources      map[string]resourcePolicy
-	router         http.Handler
+	project              project.Context
+	executionScope       project.Scope
+	publicActor          actor.Context
+	module               Module
+	records              RecordService
+	revisions            RevisionRegistryService
+	drafts               DraftWorkflowService
+	accessAdministration AccessAdministration
+	resources            map[string]resourcePolicy
+	router               http.Handler
 }
 
 type resourcePolicy struct {
@@ -109,12 +131,16 @@ func New(config Config) (*Handler, error) {
 	if config.AdminAuth == nil {
 		return nil, fmt.Errorf("http API administrator authentication is nil")
 	}
+	if config.AccessAdministration == nil {
+		return nil, fmt.Errorf("http API access administration is nil")
+	}
 
 	handler := &Handler{
 		project: config.Project, executionScope: config.Scope,
-		publicActor: config.PublicActor, adminActor: config.AdminAuth.actor,
-		module: config.Module, records: config.Records, revisions: config.Revisions, drafts: config.Drafts,
-		resources: makeResourcePolicies(config.Module.Descriptor()),
+		publicActor: config.PublicActor,
+		module:      config.Module, records: config.Records, revisions: config.Revisions, drafts: config.Drafts,
+		accessAdministration: config.AccessAdministration,
+		resources:            makeResourcePolicies(config.Module.Descriptor()),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(coreModulePath, handler.handleModuleArtifact)
@@ -134,6 +160,7 @@ func New(config Config) (*Handler, error) {
 	if config.Drafts != nil {
 		handler.registerDraftRoutes(mux, config.AdminAuth)
 	}
+	handler.registerAccessRoutes(mux, config.AdminAuth)
 	mux.HandleFunc("/", handler.handleNotFound)
 	handler.router = withRequestID(mux)
 	return handler, nil
@@ -151,16 +178,6 @@ func validateActors(config Config) error {
 	}
 	if config.PublicActor.ProjectID().String() != projectID {
 		return fmt.Errorf("http API public actor belongs to another project")
-	}
-	if config.AdminAuth == nil {
-		return fmt.Errorf("http API administrator authentication is nil")
-	}
-	adminActor := config.AdminAuth.actor
-	if !adminActor.Valid() || adminActor.Anonymous() {
-		return fmt.Errorf("http API administrator actor must be authenticated")
-	}
-	if adminActor.ProjectID().String() != projectID {
-		return fmt.Errorf("http API administrator actor belongs to another project")
 	}
 	return nil
 }

@@ -105,7 +105,11 @@ func executeWithFactories(
 	projectZone := flags.String("project-time-zone", envOr(getenv, "PANVARA_PROJECT_TIME_ZONE", "UTC"), "single-project IANA time zone")
 	projectMoney := flags.String("project-currency", envOr(getenv, "PANVARA_PROJECT_CURRENCY", "USD"), "single-project ISO currency")
 	environmentKey := flags.String("environment-key", envOr(getenv, "PANVARA_ENVIRONMENT_KEY", "default"), "single-project default environment key")
-	adminToken := flags.String("admin-token", envOr(getenv, "PANVARA_ADMIN_TOKEN", ""), "bootstrap administrator token (prefer PANVARA_ADMIN_TOKEN; CLI arguments are process-visible)")
+	adminToken := flags.String(
+		"admin-token",
+		envOr(getenv, "PANVARA_ADMIN_TOKEN", ""),
+		"first-start bootstrap credential token (optional after initialization; prefer PANVARA_ADMIN_TOKEN because CLI arguments are process-visible)",
+	)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil

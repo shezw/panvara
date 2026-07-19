@@ -82,6 +82,7 @@ func TestPostgresMigrateUpgrades0001OnlyDatabaseWithoutChangingFlexData(t *testi
 	checksums["0002_module_revision_registry.sql"] = embeddedMigrationChecksum(t, "0002_module_revision_registry.sql")
 	checksums["0003_module_draft_workflow.sql"] = embeddedMigrationChecksum(t, "0003_module_draft_workflow.sql")
 	checksums["0004_project_environment_access.sql"] = embeddedMigrationChecksum(t, "0004_project_environment_access.sql")
+	checksums["0005_project_access_administration.sql"] = embeddedMigrationChecksum(t, "0005_project_access_administration.sql")
 	assertMigrationLedger(t, ctx, pool, checksums)
 	assertFlexRowCounts(t, ctx, pool, 2, 2, 1)
 
@@ -198,6 +199,7 @@ func TestPostgresMigrateUpgrades0002RegistryWithoutChangingFacts(t *testing.T) {
 	}
 	checksums["0003_module_draft_workflow.sql"] = embeddedMigrationChecksum(t, "0003_module_draft_workflow.sql")
 	checksums["0004_project_environment_access.sql"] = embeddedMigrationChecksum(t, "0004_project_environment_access.sql")
+	checksums["0005_project_access_administration.sql"] = embeddedMigrationChecksum(t, "0005_project_access_administration.sql")
 	assertMigrationLedger(t, ctx, pool, checksums)
 	assertFlexRowCounts(t, ctx, pool, 2, 2, 1)
 
@@ -322,6 +324,9 @@ func TestPostgresMigrateUpgrades0003DraftFactsIntoPersistentAccessScope(t *testi
 	checksums["0004_project_environment_access.sql"] = embeddedMigrationChecksum(
 		t, "0004_project_environment_access.sql",
 	)
+	checksums["0005_project_access_administration.sql"] = embeddedMigrationChecksum(
+		t, "0005_project_access_administration.sql",
+	)
 	assertMigrationLedger(t, ctx, pool, checksums)
 
 	definition, err := project.NewContext(
@@ -340,13 +345,36 @@ func TestPostgresMigrateUpgrades0003DraftFactsIntoPersistentAccessScope(t *testi
 	if err != nil {
 		t.Fatalf("EnsureBootstrapScope(upgraded 0003) error = %v", err)
 	}
+	accessAdminStore, err := panvarapg.NewAccessAdminStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapRegistrar, err := access.NewDefaultBootstrapCredentialRegistrar(accessAdminStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const upgradedBootstrapToken = "upgrade-0003-bootstrap-token-32-bytes"
+	if _, err := bootstrapRegistrar.Register(
+		ctx, scope, "bootstrap-admin", upgradedBootstrapToken,
+	); err != nil {
+		t.Fatalf("Register(upgraded 0003 bootstrap credential) error = %v", err)
+	}
+	authenticator, err := access.NewCredentialAuthenticator(accessAdminStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticated, err := authenticator.Authenticate(ctx, scope, upgradedBootstrapToken)
+	if err != nil {
+		t.Fatalf("Authenticate(upgraded 0003 bootstrap credential) error = %v", err)
+	}
 	authorizer, err := access.NewPolicy(projectAccess)
 	if err != nil {
 		t.Fatal(err)
 	}
-	upgradedExecution := integrationAdminExecution(
-		t, projectID, scope.EnvironmentID().String(), "bootstrap-admin",
-	)
+	upgradedExecution, err := access.NewAdminExecution(scope, authenticated)
+	if err != nil {
+		t.Fatal(err)
+	}
 	restartedRegistry, err := application.NewRevisionRegistry(revisionStore, authorizer, clock)
 	if err != nil {
 		t.Fatal(err)
@@ -388,6 +416,247 @@ func TestPostgresMigrateUpgrades0003DraftFactsIntoPersistentAccessScope(t *testi
 		if count != want {
 			t.Fatalf("upgraded %s rows = %d, want %d", table, count, want)
 		}
+	}
+}
+
+func TestPostgresMigrateUpgrades0004AccessFactsWithoutRestoringAuthority(t *testing.T) {
+	tests := []struct {
+		name            string
+		principalStatus string
+		grantState      string
+		wantAuthError   error
+		wantPolicyError error
+	}{
+		{name: "active owner", principalStatus: "active", grantState: "active"},
+		{name: "revoked owner", principalStatus: "active", grantState: "revoked", wantPolicyError: access.ErrForbidden},
+		{name: "missing owner", principalStatus: "active", grantState: "missing", wantPolicyError: access.ErrForbidden},
+		{name: "disabled principal", principalStatus: "disabled", grantState: "active", wantAuthError: access.ErrUnauthenticated},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+			defer cancel()
+			pool := isolatedPool(t, ctx, integrationDatabaseURL(t, ctx))
+			checksums := applyMigrationsThrough0004(t, ctx, pool)
+
+			projectID := "01981234-5678-7abc-8def-0123456789ab"
+			environmentID := integrationEnvironmentA
+			createdAt := time.Date(2026, time.July, 18, 1, 0, 0, 0, time.UTC)
+			updatedAt := createdAt
+			if test.principalStatus == "disabled" {
+				updatedAt = createdAt.Add(time.Hour)
+			}
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO panvara_project (
+					project_id, project_key, default_locale, default_time_zone,
+					default_currency, created_at, updated_at
+				) VALUES ($1, 'upgrade-0004', 'en-US', 'UTC', 'USD', $2, $2)
+			`, projectID, createdAt); err != nil {
+				t.Fatalf("insert 0004 project fact: %v", err)
+			}
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO panvara_environment (
+					project_id, environment_id, environment_key, is_default,
+					created_at, updated_at
+				) VALUES ($1, $2, 'default', true, $3, $3)
+			`, projectID, environmentID, createdAt); err != nil {
+				t.Fatalf("insert 0004 environment fact: %v", err)
+			}
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO panvara_principal (
+					project_id, principal_id, status, created_at, updated_at
+				) VALUES ($1, 'bootstrap-admin', $2, $3, $4)
+			`, projectID, test.principalStatus, createdAt, updatedAt); err != nil {
+				t.Fatalf("insert 0004 principal fact: %v", err)
+			}
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO panvara_principal (
+					project_id, principal_id, status, created_at, updated_at
+				) VALUES ($1, 'svc:legacy', 'active', $2, $2)
+			`, projectID, createdAt); err != nil {
+				t.Fatalf("insert 0004 legacy principal fact: %v", err)
+			}
+			var legacyRevokedAt *time.Time
+			if test.grantState == "revoked" {
+				value := createdAt.Add(2 * time.Hour)
+				legacyRevokedAt = &value
+			}
+			if test.grantState != "missing" {
+				if _, err := pool.Exec(ctx, `
+					INSERT INTO panvara_access_grant (
+						project_id, environment_id, principal_id, role,
+						granted_at, revoked_at
+					) VALUES ($1, $2, 'bootstrap-admin', 'project.owner', $3, $4)
+				`, projectID, environmentID, createdAt, legacyRevokedAt); err != nil {
+					t.Fatalf("insert 0004 owner grant: %v", err)
+				}
+			}
+
+			if err := panvarapg.Migrate(ctx, pool); err != nil {
+				t.Fatalf("Migrate(0004 -> current) error = %v", err)
+			}
+			checksums["0005_project_access_administration.sql"] = embeddedMigrationChecksum(
+				t, "0005_project_access_administration.sql",
+			)
+			assertMigrationLedger(t, ctx, pool, checksums)
+
+			var kind, displayName, status string
+			var disabledAt *time.Time
+			if err := pool.QueryRow(ctx, `
+				SELECT kind, display_name, status, disabled_at
+				FROM panvara_principal
+				WHERE project_id = $1 AND principal_id = 'bootstrap-admin'
+			`, projectID).Scan(&kind, &displayName, &status, &disabledAt); err != nil {
+				t.Fatalf("read upgraded 0004 principal: %v", err)
+			}
+			if kind != "bootstrap" || displayName != "bootstrap-admin" || status != test.principalStatus {
+				t.Fatalf("upgraded principal = kind %q display %q status %q", kind, displayName, status)
+			}
+			if (test.principalStatus == "disabled") != (disabledAt != nil) {
+				t.Fatalf("upgraded principal disabled_at = %v for status %q", disabledAt, test.principalStatus)
+			}
+			var legacyKind string
+			if err := pool.QueryRow(ctx, `
+				SELECT kind FROM panvara_principal
+				WHERE project_id = $1 AND principal_id = 'svc:legacy'
+			`, projectID).Scan(&legacyKind); err != nil {
+				t.Fatalf("read upgraded 0004 legacy principal: %v", err)
+			}
+			if legacyKind != "bootstrap" {
+				t.Fatalf("upgraded legacy principal kind = %q, want bootstrap", legacyKind)
+			}
+
+			var grantCount int
+			if err := pool.QueryRow(ctx, `
+				SELECT count(*)
+				FROM panvara_access_grant
+				WHERE project_id = $1 AND environment_id = $2
+				  AND principal_id = 'bootstrap-admin' AND role = 'project.owner'
+			`, projectID, environmentID).Scan(&grantCount); err != nil {
+				t.Fatal(err)
+			}
+			wantGrantCount := 1
+			if test.grantState == "missing" {
+				wantGrantCount = 0
+			}
+			if grantCount != wantGrantCount {
+				t.Fatalf("upgraded owner grant count = %d, want %d", grantCount, wantGrantCount)
+			}
+			if grantCount == 1 {
+				var grantedBy string
+				var revokedBy *string
+				var revokedAt *time.Time
+				var grantUpdatedAt time.Time
+				if err := pool.QueryRow(ctx, `
+					SELECT granted_by_principal_id, revoked_by_principal_id,
+					       revoked_at, updated_at
+					FROM panvara_access_grant
+					WHERE project_id = $1 AND environment_id = $2
+					  AND principal_id = 'bootstrap-admin' AND role = 'project.owner'
+				`, projectID, environmentID).Scan(
+					&grantedBy, &revokedBy, &revokedAt, &grantUpdatedAt,
+				); err != nil {
+					t.Fatal(err)
+				}
+				if grantedBy != "bootstrap-admin" || (test.grantState == "revoked") != (revokedAt != nil) ||
+					(test.grantState == "revoked") != (revokedBy != nil) || grantUpdatedAt.Before(createdAt) {
+					t.Fatalf("upgraded owner grant = granted_by %q revoked_by %v revoked_at %v updated_at %v",
+						grantedBy, revokedBy, revokedAt, grantUpdatedAt,
+					)
+				}
+			}
+
+			definition, err := project.NewContext(projectID, "upgrade-0004", "en-US", "UTC", "USD")
+			if err != nil {
+				t.Fatal(err)
+			}
+			projectAccess, err := panvarapg.NewProjectAccessStore(pool)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope, err := projectAccess.EnsureBootstrapScope(
+				ctx, definition, "default", "bootstrap-admin",
+			)
+			if err != nil {
+				t.Fatalf("EnsureBootstrapScope(upgraded 0004) error = %v", err)
+			}
+			if err := pool.QueryRow(ctx, `
+				SELECT count(*) FROM panvara_access_grant
+				WHERE project_id = $1 AND environment_id = $2
+				  AND principal_id = 'bootstrap-admin' AND role = 'project.owner'
+			`, projectID, environmentID).Scan(&grantCount); err != nil {
+				t.Fatal(err)
+			}
+			if grantCount != wantGrantCount {
+				t.Fatalf("EnsureBootstrapScope restored owner grant count to %d, want %d", grantCount, wantGrantCount)
+			}
+
+			accessStore, err := panvarapg.NewAccessAdminStore(pool)
+			if err != nil {
+				t.Fatal(err)
+			}
+			registrar, err := access.NewDefaultBootstrapCredentialRegistrar(accessStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const token = "upgrade-0004-bootstrap-token-at-least-32-bytes"
+			credential, err := registrar.Register(ctx, scope, "bootstrap-admin", token)
+			if err != nil {
+				t.Fatalf("Register(upgraded 0004 bootstrap) error = %v", err)
+			}
+			restartedCredential, err := registrar.Register(ctx, scope, "bootstrap-admin", "")
+			if err != nil || restartedCredential.ID() != credential.ID() {
+				t.Fatalf("Register(upgraded 0004 restart) = %s, %v, want %s",
+					restartedCredential.ID().String(), err, credential.ID().String(),
+				)
+			}
+			if _, err := registrar.Register(
+				ctx, scope, "bootstrap-admin", "changed-upgrade-bootstrap-token-at-least-32-bytes",
+			); !errors.Is(err, access.ErrConflict) {
+				t.Fatalf("Register(changed upgraded 0004 token) error = %v, want conflict", err)
+			}
+			for table, want := range map[string]int{
+				"panvara_api_credential":          1,
+				"panvara_access_bootstrap_marker": 1,
+				"panvara_security_audit_event":    1,
+			} {
+				var count int
+				if err := pool.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil {
+					t.Fatalf("count upgraded %s: %v", table, err)
+				}
+				if count != want {
+					t.Fatalf("upgraded %s rows = %d, want %d", table, count, want)
+				}
+			}
+
+			authenticator, err := access.NewCredentialAuthenticator(accessStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			authenticated, authErr := authenticator.Authenticate(ctx, scope, token)
+			if test.wantAuthError != nil {
+				if !errors.Is(authErr, test.wantAuthError) {
+					t.Fatalf("Authenticate(upgraded 0004) error = %v, want %v", authErr, test.wantAuthError)
+				}
+				return
+			}
+			if authErr != nil {
+				t.Fatalf("Authenticate(upgraded 0004) error = %v", authErr)
+			}
+			execution, err := access.NewAdminExecution(scope, authenticated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy, err := access.NewPolicy(projectAccess)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policyErr := policy.Authorize(ctx, execution, access.OperationPrincipalList)
+			if !errors.Is(policyErr, test.wantPolicyError) ||
+				(test.wantPolicyError == nil && policyErr != nil) {
+				t.Fatalf("Authorize(upgraded 0004) error = %v, want %v", policyErr, test.wantPolicyError)
+			}
+		})
 	}
 }
 
@@ -470,6 +739,31 @@ func applyMigrationsThrough0003(
 		t.Fatal(err)
 	}
 	checksums["0003_module_draft_workflow.sql"] = checksum
+	return checksums
+}
+
+func applyMigrationsThrough0004(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+) map[string]string {
+	t.Helper()
+	checksums := applyMigrationsThrough0003(t, ctx, pool)
+	script, err := fs.ReadFile(migrations.Files(), "0004_project_environment_access.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, string(script), pgx.QueryExecModeSimpleProtocol); err != nil {
+		t.Fatal(err)
+	}
+	checksum := migrationChecksum(script)
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO panvara_schema_migration (version, checksum) VALUES ($1, $2)`,
+		"0004_project_environment_access.sql", checksum,
+	); err != nil {
+		t.Fatal(err)
+	}
+	checksums["0004_project_environment_access.sql"] = checksum
 	return checksums
 }
 

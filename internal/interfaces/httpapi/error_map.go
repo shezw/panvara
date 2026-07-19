@@ -34,7 +34,15 @@ func (handler *Handler) writeApplicationError(writer http.ResponseWriter, reques
 	case errors.As(err, &validation):
 		writeError(writer, request, http.StatusUnprocessableEntity, "validation_failed", "record validation failed", validation.Violations)
 	case errors.Is(err, access.ErrUnauthenticated):
-		writeError(writer, request, http.StatusUnauthorized, "unauthenticated", "authentication is required", nil)
+		writeAuthenticationRequired(writer, request)
+	case errors.Is(err, access.ErrInvalid):
+		writeError(writer, request, http.StatusBadRequest, "invalid_access_request", "access request is invalid", nil)
+	case errors.Is(err, access.ErrNotFound):
+		writeError(writer, request, http.StatusNotFound, "access_not_found", "access resource was not found", nil)
+	case errors.Is(err, access.ErrLastOwnerPath):
+		writeError(writer, request, http.StatusConflict, "last_owner_path", "the last usable project owner path cannot be removed", nil)
+	case errors.Is(err, access.ErrConflict):
+		writeError(writer, request, http.StatusConflict, "access_conflict", "access resource lifecycle conflicts with the request", nil)
 	case errors.Is(err, access.ErrForbidden), errors.Is(err, access.ErrScopeInactive),
 		errors.Is(err, record.ErrOperationForbidden):
 		writeError(writer, request, http.StatusForbidden, "forbidden", "operation is not allowed", nil)

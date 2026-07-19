@@ -197,18 +197,12 @@ func newTestHandlerWithRevisionService(t *testing.T, revisions RevisionRegistryS
 	if err != nil {
 		t.Fatal(err)
 	}
-	adminActor, err := actor.New(testProjectID, "bootstrap-admin", []string{"project.owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	auth, err := NewBootstrapAdminAuth(testAdminToken, adminActor)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scope := testProjectScope(t)
+	auth := newTestAdminAuth(t, scope)
 	handler, err := New(Config{
-		Project: projectContext, Scope: testProjectScope(t),
+		Project: projectContext, Scope: scope,
 		PublicActor: publicActor, Module: fakeModule{}, Records: &fakeRecordService{},
-		Revisions: revisions, AdminAuth: auth,
+		Revisions: revisions, AdminAuth: auth, AccessAdministration: &fakeAccessAdministration{},
 	})
 	if err != nil {
 		t.Fatal(err)

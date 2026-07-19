@@ -36,7 +36,7 @@ type serverConfig struct {
 }
 
 func (config serverConfig) validate() error {
-	missing := make([]string, 0, 4)
+	missing := make([]string, 0, 3)
 	if strings.TrimSpace(config.databaseURL) == "" {
 		missing = append(missing, "database URL")
 	}
@@ -45,9 +45,6 @@ func (config serverConfig) validate() error {
 	}
 	if strings.TrimSpace(config.projectID) == "" {
 		missing = append(missing, "project ID")
-	}
-	if config.adminToken == "" {
-		missing = append(missing, "administrator token")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("server profile requires %s", strings.Join(missing, ", "))

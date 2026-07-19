@@ -41,6 +41,8 @@ const requiredPages = [
   "docs/adr/0002-immutable-revision-registry.md",
   "docs/adr/0003-draft-validation-change-plan.md",
   "docs/adr/0004-persistent-execution-scope-access-kernel.md",
+  "docs/adr/0005-project-local-access-administration.md",
+  "docs/modules/access-administration.md",
 ];
 
 const moduleHeadings = [

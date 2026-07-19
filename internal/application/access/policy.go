@@ -22,15 +22,15 @@ import (
 // Policy authorizes public record access and authoritative project-owner admin
 // access. AppModule policy remains the second, resource-specific public gate.
 type Policy struct {
-	grants GrantReader
+	authority AuthorityReader
 }
 
 // NewPolicy constructs an authorization policy with authoritative grant state.
-func NewPolicy(grants GrantReader) (*Policy, error) {
-	if grants == nil {
-		return nil, fmt.Errorf("%w: nil grant reader", ErrInvalidRequest)
+func NewPolicy(authority AuthorityReader) (*Policy, error) {
+	if authority == nil {
+		return nil, fmt.Errorf("%w: nil authority reader", ErrInvalidRequest)
 	}
-	return &Policy{grants: grants}, nil
+	return &Policy{authority: authority}, nil
 }
 
 // Authorize validates scope activity before applying surface and operation
@@ -46,14 +46,14 @@ func (policy *Policy) Authorize(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if policy == nil || policy.grants == nil {
+	if policy == nil || policy.authority == nil {
 		return fmt.Errorf("%w: policy is not initialized", ErrUnavailable)
 	}
 	if err := execution.Validate(); err != nil {
 		return err
 	}
 
-	active, err := policy.grants.ScopeActive(ctx, execution.Scope())
+	active, err := policy.authority.ScopeActive(ctx, execution.Scope())
 	if err != nil {
 		return fmt.Errorf("%w: read scope state: %w", ErrUnavailable, err)
 	}
@@ -75,7 +75,19 @@ func (policy *Policy) Authorize(
 		if subject.Anonymous() {
 			return ErrUnauthenticated
 		}
-		granted, err := policy.grants.HasActiveGrant(
+		credentialActive, err := policy.authority.CredentialActive(
+			ctx,
+			execution.Scope(),
+			subject.ActorID(),
+			execution.CredentialID(),
+		)
+		if err != nil {
+			return fmt.Errorf("%w: read credential authority: %w", ErrUnavailable, err)
+		}
+		if !credentialActive {
+			return ErrUnauthenticated
+		}
+		granted, err := policy.authority.HasActiveGrant(
 			ctx,
 			execution.Scope(),
 			subject.ActorID(),

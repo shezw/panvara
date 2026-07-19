@@ -74,6 +74,9 @@ func TestExecuteHelpIsSuccessful(t *testing.T) {
 	if !strings.Contains(output.String(), "Usage of panvara") {
 		t.Fatalf("help output = %q", output.String())
 	}
+	if !strings.Contains(output.String(), "optional after initialization") {
+		t.Fatalf("help does not explain bootstrap credential lifecycle: %q", output.String())
+	}
 }
 
 func TestExecuteRejectsPositionalArguments(t *testing.T) {
@@ -183,6 +186,41 @@ func TestExecuteServerProfileAssemblesApplicationRouter(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "profile=server") || !strings.Contains(output.String(), "module=crm") {
 		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestExecuteServerProfileAllowsEmptyTokenAfterInitialization(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	server := &fakeRuntimeServer{errors: make(chan error)}
+	var output bytes.Buffer
+	err := executeWithFactories(
+		ctx,
+		[]string{
+			"--profile=server",
+			"--database-url=postgres://redacted",
+			"--module-source=crm.yaml",
+			"--project-id=018f7e93-7b2c-7abc-8def-1234567890ab",
+		},
+		&output,
+		emptyEnvironment,
+		func(_ string, _ httpserver.StatusSource, _ buildinfo.Info, _ http.Handler) runtimeServer {
+			return server
+		},
+		func(_ context.Context, config serverConfig) (*applicationRuntime, error) {
+			if config.adminToken != "" {
+				t.Fatalf("administrator token = %q, want empty", config.adminToken)
+			}
+			return &applicationRuntime{
+				handler: http.NotFoundHandler(), module: "crm", revision: testRevisionHash,
+				ready: readinessStatus(true),
+			}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

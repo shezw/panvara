@@ -491,17 +491,12 @@ func newTestHandlerWithModule(t *testing.T, module Module, records RecordService
 	if err != nil {
 		t.Fatal(err)
 	}
-	adminActor, err := actor.New(testProjectID, "bootstrap-admin", []string{"project.owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	auth, err := NewBootstrapAdminAuth(testAdminToken, adminActor)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scope := testProjectScope(t)
+	auth := newTestAdminAuth(t, scope)
 	handler, err := New(Config{
-		Project: projectContext, Scope: testProjectScope(t),
+		Project: projectContext, Scope: scope,
 		PublicActor: publicActor, Module: module, Records: records, AdminAuth: auth,
+		AccessAdministration: &fakeAccessAdministration{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -646,7 +641,7 @@ func performAdminRequest(handler http.Handler, method, path, body, ifMatch strin
 func assertAdminIdentity(t *testing.T, ctx context.Context) {
 	t.Helper()
 	identity, ok := IdentityFromContext(ctx)
-	if !ok || identity.Actor.ActorID() != "bootstrap-admin" || !identity.Actor.HasRole("project.owner") ||
+	if !ok || identity.Actor.ActorID() != "bootstrap-admin" || len(identity.Actor.Roles()) != 0 ||
 		identity.Project.ID().String() != testProjectID ||
 		identity.Scope.EnvironmentID().String() != testEnvironmentID ||
 		identity.Surface != access.SurfaceAdmin {

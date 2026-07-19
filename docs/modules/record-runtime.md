@@ -40,7 +40,7 @@ alpha.2 已实现：
 - Server Profile 已启动并且 `/readyz` 返回 200。
 - PostgreSQL 18.4 可用。
 - 已加载 [`crm-leads`](crm-leads.md) 或你自己的 AppModule。
-- Admin 操作需要与 Server 相同的 `PANVARA_ADMIN_TOKEN`。
+- Admin 操作需要有效的 Owner Credential；下面的首启示例沿用 `PANVARA_ADMIN_TOKEN`，也可以使用已授予 `project.owner` 的 Service Credential。
 - 使用 `curl` 或任意能发送 JSON/HTTP Header 的工具。
 
 ## 最小示例

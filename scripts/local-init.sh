@@ -30,7 +30,7 @@ if [ ! -f .env.local ]; then
   token="$(openssl rand -hex 32)"
   printf 'PANVARA_ADMIN_TOKEN=%s\n' "$token" >.env.local
   chmod 600 .env.local
-  printf '[created] .env.local with a private development token\n'
+  printf '[created] .env.local with a private bootstrap credential\n'
 else
   printf '[kept] .env.local already exists; token was not replaced\n'
 fi
@@ -38,3 +38,4 @@ fi
 printf '\nLocal configuration is ready. Load it in every new terminal with:\n'
 printf '  set -a; . ./.env; . ./.env.local; set +a\n'
 printf '\n.env and .env.local are ignored by Git. Do not commit them.\n'
+printf 'The bootstrap credential is required for first Project initialization; do not replace it after initialization.\n'

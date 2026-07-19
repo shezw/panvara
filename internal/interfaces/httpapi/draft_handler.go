@@ -47,7 +47,7 @@ type DraftWorkflowService interface {
 	GetPlan(context.Context, access.Execution, string, string, string) (application.DraftPlan, error)
 }
 
-func (handler *Handler) registerDraftRoutes(mux *http.ServeMux, auth *BootstrapAdminAuth) {
+func (handler *Handler) registerDraftRoutes(mux *http.ServeMux, auth AdminAuth) {
 	admin := func(next http.HandlerFunc) http.Handler {
 		return auth.Middleware(handler.withIdentity(record.SurfaceAdmin, next))
 	}

@@ -90,10 +90,7 @@ func TestScopeAndExecutionPreserveExactBoundary(t *testing.T) {
 
 	scope := testScope(t, testProjectID, testEnvironmentID)
 	subject := testActor(t, testProjectID, "owner", nil)
-	execution, err := NewExecution(scope, subject, SurfaceAdmin)
-	if err != nil {
-		t.Fatal(err)
-	}
+	execution := mustExecution(t, scope, subject, SurfaceAdmin)
 	if execution.Scope().ProjectID().String() != testProjectID ||
 		execution.Scope().EnvironmentID().String() != testEnvironmentID ||
 		execution.Actor().ActorID() != "owner" ||
@@ -107,14 +104,14 @@ func TestExecutionRejectsCrossProjectAndMalformedInput(t *testing.T) {
 
 	scope := testScope(t, testProjectID, testEnvironmentID)
 	other := testActor(t, otherProjectID, "owner", nil)
-	if _, err := NewExecution(scope, other, SurfaceAdmin); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := NewExecution(scope, other, SurfaceAdmin); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cross-project NewExecution() error = %v, want ErrInvalidRequest", err)
 	}
 	subject := testActor(t, testProjectID, "owner", nil)
 	if _, err := NewExecution(scope, subject, Surface("unknown")); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("invalid surface NewExecution() error = %v, want ErrInvalidRequest", err)
 	}
-	if _, err := NewExecution(project.Scope{}, subject, SurfaceAdmin); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := NewExecution(project.Scope{}, subject, SurfaceAdmin); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("zero scope NewExecution() error = %v, want ErrInvalidRequest", err)
 	}
 }
@@ -150,6 +147,16 @@ func allOperations() []Operation {
 		OperationDraftPlan,
 		OperationDraftGetValidation,
 		OperationDraftGetPlan,
+		OperationPrincipalList,
+		OperationPrincipalCreate,
+		OperationPrincipalDisable,
+		OperationCredentialList,
+		OperationCredentialIssue,
+		OperationCredentialRevoke,
+		OperationCredentialBootstrap,
+		OperationProjectOwnerList,
+		OperationProjectOwnerGrant,
+		OperationProjectOwnerRevoke,
 	}
 }
 

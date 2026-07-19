@@ -87,16 +87,6 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	if err != nil {
 		return nil, fmt.Errorf("construct public actor context: %w", err)
 	}
-	adminActor, err := actor.New(
-		projectContext.ID().String(), bootstrapAdminPrincipal, nil,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("construct bootstrap administrator context: %w", err)
-	}
-	auth, err := httpapi.NewBootstrapAdminAuth(config.adminToken, adminActor)
-	if err != nil {
-		return nil, fmt.Errorf("construct bootstrap administrator authentication: %w", err)
-	}
 
 	pool, err := postgres.Open(ctx, config.databaseURL)
 	if err != nil {
@@ -121,9 +111,36 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	if err != nil {
 		return nil, fmt.Errorf("ensure bootstrap project access scope: %w", err)
 	}
+	accessStore, err := postgres.NewAccessAdminStore(pool)
+	if err != nil {
+		return nil, err
+	}
+	bootstrapCredentials, err := access.NewDefaultBootstrapCredentialRegistrar(accessStore)
+	if err != nil {
+		return nil, fmt.Errorf("construct bootstrap credential registrar: %w", err)
+	}
+	if _, err := bootstrapCredentials.Register(
+		ctx, executionScope, bootstrapAdminPrincipal, config.adminToken,
+	); err != nil {
+		return nil, fmt.Errorf("ensure bootstrap administrator credential: %w", err)
+	}
+	authenticator, err := access.NewCredentialAuthenticator(accessStore)
+	if err != nil {
+		return nil, fmt.Errorf("construct credential authenticator: %w", err)
+	}
+	auth, err := httpapi.NewCredentialAdminAuth(executionScope, authenticator)
+	if err != nil {
+		return nil, fmt.Errorf("construct administrator authentication: %w", err)
+	}
 	authorizer, err := access.NewPolicy(projectAccessStore)
 	if err != nil {
 		return nil, fmt.Errorf("construct application access policy: %w", err)
+	}
+	accessAdministration, err := access.NewDefaultAdministration(
+		accessStore, authorizer, accessStore,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("construct access administration: %w", err)
 	}
 	revisionStore, err := postgres.NewRevisionStore(pool)
 	if err != nil {
@@ -167,6 +184,7 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 		Project: projectContext, Scope: executionScope,
 		PublicActor: publicActor, Module: module, Records: records,
 		Revisions: revisions, Drafts: drafts, AdminAuth: auth,
+		AccessAdministration: accessAdministration,
 	})
 	if err != nil {
 		return nil, err

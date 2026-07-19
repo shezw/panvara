@@ -24,7 +24,7 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 - 单进程可以自然演进为 Server + Manager + Worker，而不重写领域规则。
 - 全球化原语从第一天进入模型，不等业务数据固化后再补。
 
-固定验证场景为 `crm-leads`。alpha.2 检查点覆盖 Organization 与 Lead 的声明、编译、CRUD、Manager UI Schema 和 PostgreSQL 持久化；alpha.3a 补充不可变 Revision 启动登记；alpha.3b 补充 raw Source Draft、Validation 与 Change Plan；P0-01a 再补充持久化 Project/单默认 Environment 与现有用例的 Application Access Kernel。受控邮件事件、完整身份/权限、真正的多 Environment 数据隔离与完整 Publish/Activate/Rollback 仍属于后续范围。身份 Account 不作为动态 Resource。
+固定验证场景为 `crm-leads`。alpha.2 覆盖声明、编译、CRUD、Manager UI Schema 与 PostgreSQL；alpha.3a/3b 补充 Registry、Draft、Validation 与 Plan；P0-01a 补充持久化 Project/默认 Environment 与 Access Kernel；P0-01b 补充 project-local Service Principal/API Credential/Owner Grant 管理、首启 marker 和最小安全审计。受控邮件事件、完整身份/权限、真正多 Environment 事实与 Publish/Activate/Rollback 仍属于后续范围。Account 不作为动态 Resource。
 
 ## 2. 版本路线
 
@@ -35,6 +35,7 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 | alpha.3a 开发切片 | 可追加 Data Schema Identities、不可变 bootstrap Revision Registry、owner 只读查询与 Source 下载 | 重启幂等、首次 Source 保留、父/子事实拒绝改写、读取可复验；Distribution 仍为 alpha.2 |
 | alpha.3b 开发切片 | 版本化 Draft、raw Source Replace、Validation、Change Plan、创建幂等与 ETag 并发保护 | invalid → replace → valid → plan 可复现，Candidate/Runtime/Record 均不改变；Distribution 仍为 alpha.2 |
 | P0-01a 开发切片 | 持久化 Project、单默认 Environment、Principal/`project.owner` Grant，以及 Record/Revision/Draft 的 Application Access Kernel | 默认 Scope 重启稳定，撤销 Grant 后 fail closed 且不会被重启恢复；完整 P0-01 与多 Environment 数据隔离仍未完成 |
+| P0-01b runnable slice | digest-only bootstrap/API Credential、Service Principal、Owner Grant API、终态、last-owner 与最小安全审计 | issue → verify → revoke；401/403/503；restart 不复活 Credential/Grant；完整 P0-01 与 P0-05 仍未完成 |
 | v0.1.0-alpha.3 | Draft/Validate/Plan/Publish/Activate/Rollback、迁移计划、审计、Outbox、本地 Worker、Email Capability | 发布失败可恢复，活动 Revision 可回滚，副作用可追踪 |
 | v0.1.0-rc.1 | 协议冻结、升级兼容、参考 Provider、完整门禁和文档 | 无已知 P0/P1；N-1 升级通过 |
 | v0.1.0 | Core Preview | 参考纵向场景和发布工件可复现 |
@@ -66,7 +67,7 @@ v0.1.0 是 Preview，不作“任意业务零代码生成”或“百万并发�
 - Compiler：生成字节稳定的 Canonical IR、Revision Hash、OpenAPI 3.1 和 Manager UI Schema。
 - 数据：PostgreSQL flex JSONB Store，按 Project/Module/Resource/Revision 隔离；支持 UUIDv7 Record、唯一值、引用、乐观版本、游标分页、等值过滤和软删除。
 - HTTP：Public 只允许模型声明的 Create；Admin 支持模型声明的 List/Get/Create/Patch/Delete，写操作使用 ETag/If-Match。
-- 临时管理认证：Server 使用至少 32 字节的 bootstrap admin Bearer Token；`BootstrapAdminAuth` 验证器只保存 SHA-256 摘要，但环境变量与启动配置中的明文生命周期不作清除保证。它不是完整账号或身份系统。
+- P0-01b 管理认证：marker 缺失时使用 32–1024 字节、仅含 Bearer 安全 ASCII且不以 `pvk1.` 开头的 bootstrap Token；原始值不入库，PostgreSQL 保存 digest/hint 与永久 marker。Owner 可签发一次性 `pvk1.` Service Credential，但它不是 Account/Session 身份系统。
 - Server：启动时从文件编译一个 AppModule、运行 migration 并装配 PostgreSQL；重启后 Record 保留。
 - 集成门禁：使用真实 PostgreSQL 18.4 验证 migration、Store 与 Server HTTP 持久化旅程。
 
@@ -109,7 +110,7 @@ alpha.3 必须用后续 ADR 定案并验证：显式且幂等的数据迁移；�
 
 具体约束和被拒绝方案见 [ADR-0003](adr/0003-draft-validation-change-plan.md)。
 
-### 4.4 P0-01a 持久化执行作用域与 Access Kernel
+### 4.4 P0-01a/P0-01b 访问边界
 
 - migration `0004` 追加 `panvara_project`、`panvara_environment`、`panvara_principal` 与 `panvara_access_grant`，不改写 `0001`–`0003`。
 - 某个 Project ID 首次由 Server 装配时，在一个事务内创建 Project、一个生成 UUIDv7 的默认 Environment、`bootstrap-admin` Principal 与精确作用域内的 `project.owner` Grant；同一 Project ID 的相同设置重启复用同一 Environment ID。新的 Project ID 与唯一 Key 会建立另一套隔离事实。
@@ -118,20 +119,22 @@ alpha.3 必须用后续 ADR 定案并验证：显式且幂等的数据迁移；�
 - Access Kernel 先核对 active 的精确默认 Scope。Public 只可进入 Record Operation；Admin 必须有 active、未撤销的持久化 Owner Grant；未知 Operation 与权威存储错误均 fail closed。
 - Record 5、Revision 3、Draft 8 个现有用例已在 Application 层固定 Operation 并授权；Record 在 Access Kernel 后继续执行 AppModule Operation Policy。启动专用 `RegisterBootstrap` 不暴露为用户用例。
 - `0001`–`0003` 的事实表仍没有 `environment_id`，所以当前只允许单默认 Environment，不提供多 Environment 数据隔离。
-- Admin Token 仍是进程内 bootstrap 认证材料，没有持久化 Credential、轮换或账号生命周期。
+- migration `0005` 增加 Service Principal/API Credential、bootstrap marker、Grant lifecycle 与最小 append-only security audit；所有新旧 Admin 用例使用 `Credential → Principal → Grant`。
+- 首启只持久化 digest/hint，marker 后续允许省略/相同 Token、拒绝改变；Credential revoke 与 Principal disable 是终态，Grant 可显式重新授予但启动不自动补回。
+- 访问 mutation 在事务内二次授权，成功审计同事务；最后一个可用 Owner path 不能被移除。认证/授权失败分别映射 401/403，权威状态不可用为 503。
 
-P0-01a 是已完成的 `runnable-slice`，不是完整 P0-01，也不把 Server Core 提升为 feature-complete 或 production-ready。具体边界见 [ADR-0004](adr/0004-persistent-execution-scope-access-kernel.md)。
+P0-01a/P0-01b 是 `runnable-slice`，不是完整 P0-01/P0-05，也不把 Server Core 提升为 feature-complete 或 production-ready。具体边界见 [ADR-0004](adr/0004-persistent-execution-scope-access-kernel.md)与 [ADR-0005](adr/0005-project-local-access-administration.md)。
 
 ## 5. alpha.3 延后能力
 
 - Publish、Activate、Rollback 与活动版本状态机；Registry 与准备变化事实已在 alpha.3a/alpha.3b 建立。
 - 数据迁移执行、完整升级兼容检查和 last-known-good 恢复；alpha.3b Plan 只解释变化。
-- 审计、Transactional Outbox、进程内 Worker 和邮件副作用。
+- 通用 Audit、Idempotency、Transactional Outbox、进程内 Worker 和邮件副作用；P0-01b 只有访问安全审计。
 - Provider Descriptor、Capability Resolution、Console/SMTP Email Adapter。
 - Manager 前端应用；alpha.2 只生成 UI Schema。
 - 动态排序；alpha.2 会拒绝任何非空 `sortable` 声明。
 - 通用业务 Idempotency Key、发布 epoch、多节点模块收敛和分布式 Runtime；alpha.3b Key 只用于 Create Draft。
-- 完整 P0-01：Credential 摘要/轮换/撤销、Account/External Identity/Session、Membership、Service Account/API Key、动态 Role/Policy、Grant 管理、Record Owner 与字段/动作级授权。
+- 完整 P0-01：Account/ExternalIdentity/Session、ProjectMembership、动态 Role/Policy、RecordOwner、字段/动作级授权，以及真正多 Environment 事实；P0-01b 只覆盖机器 Principal/Credential 与固定 Owner Grant。
 - 多 Environment 事实隔离：为 Record、Revision、Draft 等既有事实增加 `environment_id`，完成回填、复合约束、游标、幂等键、升级与回滚验证；P0-01a 只拒绝非默认 Scope。
 - Release、Migration、Provider 与后续 Job/Event 用例接入同一 Access Kernel；这些用例尚未实现，不能由 P0-01a 代替其授权负例。
 - 业务写入与 Outbox 同事务、ProjectReleaseSnapshot + epoch，以及宽唯一值的 Hash 索引加原值碰撞复核评估。
@@ -143,7 +146,7 @@ P0-01a 是已完成的 `runnable-slice`，不是完整 P0-01，也不把 Server 
 - flex JSONB 存储与必要的系统列、索引和约束。
 - Public/Admin REST CRUD 与 OpenAPI。
 - 角色、所有者和字段基础权限。
-- Core 内置 ActorContext、持久化 bootstrap Principal/`project.owner` Grant 与摘要比较的临时管理 API Token。
+- Core 内置 ActorContext、project-local Service Principal/API Credential 与固定 `project.owner` Grant。
 - Draft、Plan、Publish、Activate、Rollback 与不可变 Revision。
 - 审计事件和 Transactional Outbox。
 - 进程内 Worker 与 PostgreSQL Outbox 拉取；为后续 NATS Adapter 保留 Port。

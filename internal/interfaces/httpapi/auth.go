@@ -16,72 +16,118 @@ package httpapi
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/shezw/panvara/internal/domain/actor"
+	"github.com/shezw/panvara/internal/application/access"
+	"github.com/shezw/panvara/internal/domain/project"
 )
 
-const minimumBootstrapTokenBytes = 32
-
-// BootstrapAdminAuth protects the temporary administrative API and retains
-// only the bootstrap token digest after construction.
-type BootstrapAdminAuth struct {
-	digest [sha256.Size]byte
-	actor  actor.Context
+// CredentialAdminAuth authenticates admin Bearer credentials against the
+// authoritative Application service for one exact execution scope.
+type CredentialAdminAuth struct {
+	scope         project.Scope
+	authenticator access.PrincipalAuthenticator
 }
 
-type authenticatedActorContextKey struct{}
+type authenticatedPrincipalContextKey struct{}
 
-// NewBootstrapAdminAuth hashes a bootstrap token for subsequent constant-time
-// comparisons. Whitespace is rejected to keep Authorization parsing exact.
-func NewBootstrapAdminAuth(token string, adminActor actor.Context) (*BootstrapAdminAuth, error) {
-	if len(token) < minimumBootstrapTokenBytes {
-		return nil, fmt.Errorf("bootstrap admin token must contain at least %d bytes", minimumBootstrapTokenBytes)
+// NewCredentialAdminAuth binds database-backed authentication to one Project
+// and Environment. The adapter never retains a configured bootstrap token.
+func NewCredentialAdminAuth(
+	scope project.Scope,
+	authenticator access.PrincipalAuthenticator,
+) (*CredentialAdminAuth, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, fmt.Errorf("construct admin authentication: invalid scope: %w", err)
 	}
-	if strings.TrimSpace(token) != token || strings.ContainsAny(token, "\r\n\t ") {
-		return nil, fmt.Errorf("bootstrap admin token must not contain whitespace")
+	if authenticator == nil {
+		return nil, fmt.Errorf("construct admin authentication: nil credential authenticator")
 	}
-	if !adminActor.Valid() || adminActor.Anonymous() {
-		return nil, fmt.Errorf("bootstrap administrator must be an authenticated actor")
-	}
-	return &BootstrapAdminAuth{digest: sha256.Sum256([]byte(token)), actor: adminActor}, nil
+	return &CredentialAdminAuth{scope: scope, authenticator: authenticator}, nil
 }
 
 // Middleware requires exactly one valid Bearer credential before calling the
 // protected handler.
-func (auth *BootstrapAdminAuth) Middleware(next http.Handler) http.Handler {
+func (auth *CredentialAdminAuth) Middleware(next http.Handler) http.Handler {
 	if next == nil {
 		next = http.NotFoundHandler()
 	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if auth == nil || !auth.authorized(request) {
-			writer.Header().Set("WWW-Authenticate", `Bearer realm="panvara-admin"`)
-			writeError(writer, request, http.StatusUnauthorized, "unauthorized", "valid administrator bearer token required", nil)
+		credential, ok := bearerCredential(request)
+		if !ok {
+			writeAuthenticationRequired(writer, request)
 			return
 		}
-		ctx := context.WithValue(request.Context(), authenticatedActorContextKey{}, auth.actor)
+		if auth == nil || auth.authenticator == nil {
+			writeAuthenticationUnavailable(writer, request)
+			return
+		}
+		principal, err := auth.authenticator.Authenticate(request.Context(), auth.scope, credential)
+		if err != nil {
+			if accessUnavailable(err) {
+				writeAuthenticationUnavailable(writer, request)
+				return
+			}
+			writeAuthenticationRequired(writer, request)
+			return
+		}
+		if !principal.Valid() ||
+			principal.Scope().ProjectID().String() != auth.scope.ProjectID().String() ||
+			principal.Scope().EnvironmentID().String() != auth.scope.EnvironmentID().String() {
+			writeAuthenticationUnavailable(writer, request)
+			return
+		}
+		ctx := context.WithValue(
+			request.Context(), authenticatedPrincipalContextKey{}, principal,
+		)
 		next.ServeHTTP(writer, request.WithContext(ctx))
 	})
 }
 
-func authenticatedActorFromContext(ctx context.Context) (actor.Context, bool) {
-	value, ok := ctx.Value(authenticatedActorContextKey{}).(actor.Context)
-	return value, ok && value.Valid() && !value.Anonymous()
+func authenticatedPrincipalFromContext(
+	ctx context.Context,
+) (access.AuthenticatedPrincipal, bool) {
+	value, ok := ctx.Value(authenticatedPrincipalContextKey{}).(access.AuthenticatedPrincipal)
+	return value, ok && value.Valid()
 }
 
-func (auth *BootstrapAdminAuth) authorized(request *http.Request) bool {
+func bearerCredential(request *http.Request) (string, bool) {
+	if request == nil {
+		return "", false
+	}
 	values := request.Header.Values("Authorization")
 	if len(values) != 1 {
-		return false
+		return "", false
 	}
 	scheme, credential, found := strings.Cut(values[0], " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") || credential == "" || strings.ContainsAny(credential, " \t\r\n") {
-		return false
+	if !found || !strings.EqualFold(scheme, "Bearer") || credential == "" || strings.ContainsAny(credential, " \t\r\n,") {
+		return "", false
 	}
-	candidate := sha256.Sum256([]byte(credential))
-	return subtle.ConstantTimeCompare(candidate[:], auth.digest[:]) == 1
+	return credential, true
 }
+
+func accessUnavailable(err error) bool {
+	return errors.Is(err, access.ErrUnavailable) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
+
+func writeAuthenticationRequired(writer http.ResponseWriter, request *http.Request) {
+	writer.Header().Set("WWW-Authenticate", `Bearer realm="panvara-admin"`)
+	writeError(
+		writer, request, http.StatusUnauthorized, "unauthorized",
+		"valid administrator bearer credential required", nil,
+	)
+}
+
+func writeAuthenticationUnavailable(writer http.ResponseWriter, request *http.Request) {
+	writeError(
+		writer, request, http.StatusServiceUnavailable, "authentication_unavailable",
+		"administrator authentication is unavailable", nil,
+	)
+}
+
+var _ AdminAuth = (*CredentialAdminAuth)(nil)

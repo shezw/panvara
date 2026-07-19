@@ -16,7 +16,7 @@
 
 ## 用途
 
-HTTP API 是 App、Website、后台或脚本访问 Panvara 的入口。alpha.2 提供匿名 Public Create、Bearer Token 保护的 Admin CRUD，以及运维和模块描述接口；alpha.3a 增加不可变 Revision Registry 的 owner 只读接口；alpha.3b 再增加 raw Source Draft、Validation 与 Change Plan 接口。本页说明 URL、认证、状态码与错误格式；业务旅程见 [CRM Leads](crm-leads.md)。
+HTTP API 是 App、Website、后台或脚本访问 Panvara 的入口。alpha.2 提供 Public/Create 与 Admin CRUD；alpha.3a/3b 增加 Registry、Draft、Validation 与 Plan；P0-01b 增加 project-local Principal/Credential/Grant 管理。所有新旧 Admin 用例统一经 `Credential → Principal → project.owner Grant` 授权。本页说明 URL、认证、状态码与错误格式；业务旅程见 [CRM Leads](crm-leads.md)。
 
 ## 当前状态
 
@@ -28,6 +28,9 @@ HTTP API 是 App、Website、后台或脚本访问 Panvara 的入口。alpha.2 �
 | Revision Detail/Source | `GET /api/admin/core/v1alpha1/modules/{module}/revisions/{revision}`、`.../{revision}/source` | Bearer Token |
 | Draft Metadata/Source | `POST .../modules/{module}/drafts`、`GET .../drafts/{draft}`、`GET/PUT .../drafts/{draft}/source` | Bearer Token |
 | Validation/Plan | `POST/GET .../drafts/{draft}/validations[/validation]`、`POST/GET .../drafts/{draft}/plans[/plan]` | Bearer Token |
+| Principal | `GET/POST /api/admin/core/v1alpha1/access/principals`、`POST .../principals/{principal}/disable` | Owner Credential |
+| Credential | `GET/POST .../principals/{principal}/credentials`、`POST .../credentials/{credential}/revoke` | Owner Credential |
+| Grant | `GET .../principals/{principal}/grants`、`PUT/DELETE .../grants/project.owner` | Owner Credential |
 | Public Create | `POST /api/public/v1alpha1/{module}/{resource}` | 无 |
 | Admin List/Create | `GET/POST /api/admin/v1alpha1/{module}/{resource}` | Bearer Token |
 | Admin Get/Patch/Delete | `GET/PATCH/DELETE /api/admin/v1alpha1/{module}/{resource}/{id}` | Bearer Token |
@@ -38,8 +41,8 @@ HTTP API 是 App、Website、后台或脚本访问 Panvara 的入口。alpha.2 �
 
 - Lite 足以验收三个运维端点。
 - 业务 API 需要 Server、PostgreSQL 和已编译 AppModule。
-- Admin API 需要启动时使用的 `PANVARA_ADMIN_TOKEN`。
-- Registry 与 Draft Planning API 还要求当前 Actor 是同一项目的 `project.owner`；接口不接受 Project 查询参数。
+- Admin API 需要 active Credential 对应 active project-local Principal，并拥有当前 Project/Environment 的 active `project.owner` Grant；可以是 bootstrap 或新签发 Credential。
+- Registry、Draft Planning、Record Admin 与 Access Administration 都使用同一授权链；接口不接受 Project 查询参数。
 - Record POST/PATCH 和 Plan POST 使用 `Content-Type: application/json`；Draft Create/Replace 的 Body 是原始 YAML/JSON，使用 `application/yaml` 或 `application/json`。
 - Patch/Delete 需要最近一次 Record 响应中的 ETag。
 
@@ -67,7 +70,7 @@ curl -i http://127.0.0.1:8080/api/admin/v1alpha1/crm.leads/organization \
 
 | Header | 用途 |
 | --- | --- |
-| `Authorization: Bearer ...` | 所有 Admin 请求；Token 至少 32 字节 |
+| `Authorization: Bearer ...` | 所有 Admin 请求；bootstrap Token 为 32–1024 字节、仅含 Bearer 安全 ASCII、非 `pvk1.` 前缀；新签发 Token 使用 `pvk1.` |
 | `Content-Type` | Record/Plan JSON；Draft Source 使用 `application/json` 或 `application/yaml` |
 | `If-Match: "2"` | Record Patch/Delete 或 Draft Replace/Validate/Plan；必须是最新强数字 ETag |
 | `Idempotency-Key` | alpha.3b Create Draft 必需；同项目、同模块、同 Key 且 Baseline、Source Format、Source 字节全部相同时安全重放 |
@@ -99,7 +102,7 @@ Record `ETag` 是带双引号的版本，例如 `"1"`。生成物 ETag 是其内
 }
 ```
 
-常见状态码：400 参数/JSON 错误；401 Token 错误；403 模型未开放；404 不存在；409 数据冲突；412 ETag 过期；415 Content-Type 错误；422 字段校验失败；428 缺少 If-Match。
+常见状态码：400 参数/JSON 错误；401 Credential 缺失/错误/撤销；403 已认证但缺 Grant、Scope inactive 或模型未开放；404 不存在；409 生命周期冲突或最后 Owner path；412 ETag 过期；415 Content-Type 错误；422 字段校验失败；428 缺少 If-Match；503 权威认证/授权状态不可用。
 
 List 支持 `limit`（1–100，默认 20）、`cursor` 和已声明的 `filter[field]=value`：
 
@@ -109,6 +112,29 @@ curl --get http://127.0.0.1:8080/api/admin/v1alpha1/crm.leads/lead \
   --data-urlencode 'filter[stage]=new' \
   --data-urlencode 'limit=20'
 ```
+
+### Project-local 访问管理
+
+访问管理路径不接受查询参数；Create Principal Body 只接受 `{"display_name":"..."}`，Issue Credential Body 只接受 `{"label":"..."}`，其余 mutation 要求空 Body。所有响应使用 `private, no-store`；签发 Credential 的 201 响应会把原始 `token` 返回且仅返回一次，并额外使用 `Pragma: no-cache`。
+
+```sh
+BASE=http://127.0.0.1:8080
+
+curl -fsS "$BASE/api/admin/core/v1alpha1/access/principals" \
+  -H "Authorization: Bearer $PANVARA_ADMIN_TOKEN" \
+  | jq '.data'
+```
+
+固定契约如下：
+
+- `GET/POST /api/admin/core/v1alpha1/access/principals`
+- `POST /api/admin/core/v1alpha1/access/principals/{principal}/disable`
+- `GET/POST /api/admin/core/v1alpha1/access/principals/{principal}/credentials`
+- `POST /api/admin/core/v1alpha1/access/credentials/{credential}/revoke`
+- `GET /api/admin/core/v1alpha1/access/principals/{principal}/grants`
+- `PUT/DELETE /api/admin/core/v1alpha1/access/principals/{principal}/grants/project.owner`
+
+Principal disable 与 Credential revoke 是不可恢复终态。Grant 可由另一个有效 Owner Credential 显式 PUT 重新授予，但 restart/bootstrap 不会自动恢复。完整的、不输出 Secret 的 `curl`/`jq` 旅程见[访问管理指南](access-administration.md#验收)。
 
 ### Revision Registry 读取
 
@@ -216,7 +242,7 @@ Plan 使用 JSON Body 引用当前 Draft Version 中有效 Validation：
 
 ### 401 和 403 有什么区别？
 
-401 表示没有通过认证；403 表示 AppModule 没开放该操作。
+401 表示没有通过 Credential 认证；403 表示已认证，但当前 Scope 缺少 active Owner Grant，或 AppModule 没开放该操作。认证/授权权威状态读失败返回 503。
 
 ### 为什么能下载 UI Schema，却看不到网页？
 
@@ -232,7 +258,7 @@ Plan 使用 JSON Body 引用当前 Draft Version 中有效 Validation：
 
 ### 可以把 Admin API 直接暴露到公网吗？
 
-不建议。alpha.2 只有临时 bootstrap Token，没有完整身份、细粒度授权、限流或生产级边缘安全。
+不建议。P0-01b 虽有 Service Principal/API Credential 与固定 Owner Grant，但仍没有 Account/Session/MFA、细粒度动态授权、限流、TLS 终止或生产级边缘安全。
 
 ### Validation 返回 201 但 `valid=false` 是失败吗？
 
@@ -245,7 +271,7 @@ Validation 请求成功，作者 Source 没有通过。读取 `violations` 修�
 ## 当前限制
 
 - 路径仍是 `v1alpha1` 实验契约；Public 仅支持 Create。
-- Admin 是单个 bootstrap owner Token，不是账号体系。
+- Admin 支持 bootstrap/Service Principal Credential，但不是 Account/Session 身份体系。
 - 没有 CORS 配置、内置 TLS、限流或 Webhook；Idempotency Key 当前仅覆盖 Create Draft，不是通用 HTTP 中间件。
 - 没有 gRPC、GraphQL、批量 API 或流式响应。
 - Record Body 最大 256 KiB；Draft Source 最大 1 MiB；请求 Header 最大 1 MiB。
