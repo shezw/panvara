@@ -1,76 +1,116 @@
 <!--
     Panvara
-    docs/getting-started/index.md    2026-07-15
+    docs/getting-started index.md    2026-07-28
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
      \/\_____\  \ \_\ \_\  \ \_____\   /\_____\  \ \__/".~\_\
-      \/_____/   \/_/\/_/   \/_____/   \/_____/   \/_/   \/_/.com
+      \/_____/   \/_/\/_/   \/_____/   \/_/   \/_/.com
 
     @link    : https://github.com/shezw/panvara
     @author  : shezw
     @email   : hello@shezw.com
 -->
 
-# 使用与验收 Guideline
+# 10 分钟启动 Lite
 
-这套 Guideline 面向第一次接触 Panvara 的使用者。你不需要理解 Go 架构或数据库内部实现，只需要能打开终端、复制命令并对照预期结果。
-
-## 最终目标
-
-完成后，你会亲自验证：
-
-- Panvara 可以在本机编译成一个可执行文件。
-- Lite 运行模式不依赖数据库也能启动。
-- Server 运行模式可以连接本地 PostgreSQL。
-- CRM 模型会生成 API 和管理界面描述。
-- 你可以创建组织和销售线索，再把线索查询出来。
-- 停止并重新启动 Server 后，刚才的数据仍然存在。
-- 你可以验证启动 Revision 只登记一次，并下载第一次登记的原始 Source。
-- 你可以保存一个有错误的 Draft，修正后生成 Change Plan，并证明它没有发布、激活或迁移数据。
-- 你可以把有效 Plan 发布为不可变 Module Release，并证明它只登记事实、不会上线或迁移数据。
-
-## 建议顺序
-
-| 步骤 | 页面 | 大约时间 | 成功标志 |
-| --- | --- | ---: | --- |
-| 1 | [安装开发工具](./prerequisites) | 5–20 分钟 | `make doctor-server` 全部显示 `[ok]` |
-| 2 | [创建本地环境](./local-environment) | 3 分钟 | `.env`、`.env.local` 已创建，PostgreSQL 为 healthy |
-| 3 | [编译并运行 Lite](./build-and-lite) | 3–8 分钟 | `/readyz` 返回 `ready` |
-| 4 | [CRM Leads 完整验收](./crm-leads-acceptance) | 8–15 分钟 | 重启后仍能查到新建线索 |
-| 5 | [Revision Registry 完整验收](./revision-registry-acceptance) | 10–15 分钟 | 重启后同一 Revision 仍恰好一条，format 1 身份可复核 |
-| 6 | [Draft → Validate → Plan 完整验收](./draft-plan-acceptance) | 10–15 分钟 | invalid → replace → valid → plan 成功，当前 Revision 与 Record 不变 |
-| 7 | [Draft → Publish 完整验收](./draft-publish-acceptance) | 10–15 分钟 | 发布与重放得到同一 Release，Candidate 入 Registry，但 Runtime 与 Record 不变 |
-
-第一次下载 Go、Node 或 Docker 镜像的时间不计入表格，因为它取决于网络速度。
-
-## 两种运行方式
-
-| 名称 | 通俗解释 | 是否需要 Docker | 当前用途 |
-| --- | --- | --- | --- |
-| Lite | 只启动 Panvara 核心和健康接口 | 否 | 验证程序可以编译和运行 |
-| Server | 加载一个模型、连接数据库并开放业务 API | 是，或自备 PostgreSQL 18.4 | 验收 alpha.2、alpha.3a Registry、alpha.3b Draft Planning 与 P0-02a Publish Facts 开发切片 |
-
-文档中出现的 “Profile” 就是这里的“运行方式”。
-
-## 验收边界
-
-当前 Manager 产物是供前端消费的 UI Schema JSON，并不是已经完成的可视化管理后台。支付、登录、邮件、模块 Activate/Rollback、数据迁移和跨节点分布式管理尚未实现。P0-02a 只有 Publish Facts；不能把它解释成 Candidate 已上线。
-
-::: danger 登记不等于发布或激活
-alpha.3a 只登记 Server 启动时已经选择的模块。Registry 没有活动指针，不能通过 List 顺序判断当前版本；当前 Revision 以 OpenAPI 的 `x-panvara-revision` 为准。
+::: info Current Distribution
+本页使用当前二进制内建 Distribution 标识 **v0.1.0-alpha.2** 对应的 Lite。`/version` 的 `distribution` 字段实际返回不带前缀的 `0.1.0-alpha.2`。Lite 不读取 AppModule、不连接数据库，也不提供业务 API；它只用于确认 Panvara 可以在你的电脑上编译和运行。
 :::
 
-::: danger Plan 不会执行变化
-alpha.3b 允许保存 Draft、生成 Validation 与 Change Plan，但 Candidate 不进入 Registry，也不会成为当前运行模型。即使 Plan 显示 `compatible`，也不能据此认为数据已经迁移或模型可以直接激活。
-:::
+已安装工具且网络可用时，这条路径通常可在 10 分钟内完成。第一次下载 Go 依赖所需时间取决于网络速度。
 
-::: danger Publish 仍不会激活
-P0-02a 会把 Candidate 幂等登记进 Registry，并创建不可变 Module Release；它不会改变当前 OpenAPI Revision、业务 Record 或启动配置。必须同时看到 `published=true` 与 `activated=false`。
-:::
+## 准备工具
 
-::: danger 模型变更与数据
-alpha.2 会把每个模型版本放在独立数据空间。直接修改正在使用的模型文件后重启，旧数据不会被删除，但在新模型版本下会暂时看不到。完成发布与迁移能力前，请保存原模型文件并先备份数据库。
-:::
+支持 macOS、Linux，以及 Windows 11 的 WSL2。需要：
 
-遇到问题时，不要跳过失败步骤，直接前往[故障排查](./troubleshooting)。
+- Git；
+- Go 1.25 或更高版本，推荐项目当前工具链版本；
+- Make；
+- curl。
+
+先确认工具可用：
+
+```sh
+git --version
+go version
+make --version
+curl --version
+```
+
+## 1. 下载 Panvara
+
+```sh
+git clone https://github.com/shezw/panvara.git
+cd panvara
+git switch --detach 38afe3e91e5a54c1a677b0acbe3a6a2a75668839
+make doctor
+```
+
+成功时最后一行是：
+
+```text
+Environment check passed.
+```
+
+`make doctor` 只检查环境，不安装软件，也不修改系统设置。
+
+当前尚无与 v0.1.0-alpha.2 对应的 GitHub Release。这里固定源码提交，是为了让 `doctor`、构建与 Lite 命令可复现。同一快照还包含隔离标注的 Source Preview；二进制版本字段不能用于推断这些预览能力已成熟或进入 Distribution。
+
+## 2. 编译并核对版本
+
+```sh
+make build
+./bin/panvara --version
+```
+
+`bin/panvara` 是编译结果。版本输出是 JSON，其中应包含：
+
+```json
+{"distribution":"0.1.0-alpha.2"}
+```
+
+实际响应还会带 Core、模型协议、提交和 Go 版本信息。
+
+## 3. 启动 Lite
+
+在终端 A 执行：
+
+```sh
+make run
+```
+
+保持这个终端运行。日志应包含：
+
+```text
+panvara 0.1.0-alpha.2 profile=lite address=127.0.0.1:8080
+```
+
+在终端 B 执行：
+
+```sh
+curl -fsS http://127.0.0.1:8080/healthz
+curl -fsS http://127.0.0.1:8080/readyz
+curl -fsS http://127.0.0.1:8080/version
+```
+
+前两条预期分别返回：
+
+```json
+{"status":"alive"}
+{"status":"ready"}
+```
+
+第三条的 `distribution` 应为 `0.1.0-alpha.2`。
+
+## 4. 停止 Lite
+
+回到终端 A，按 `Ctrl+C`。Lite 没有连接数据库，因此这一步不会删除业务数据。
+
+## 下一步
+
+- 想加载 AppModule 并保存真实数据：继续[运行 PostgreSQL Server](/guides/server)。
+- 想先理解模型、API 与存储的关系：阅读[认识 Panvara](/guides/concepts)。
+- 端口被占用或命令失败：查看[故障排查](/reference/troubleshooting)。
+
+> Lite 成功只证明本机工具链和基础 HTTP 进程可用，不代表 Server、PostgreSQL 或业务 API 已经验证。

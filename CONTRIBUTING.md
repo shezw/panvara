@@ -14,7 +14,7 @@
 
 # 参与 Panvara 开发
 
-开始前请先完成[开发环境](docs/development.md)配置，并阅读[总体架构](docs/arch.md)。
+开始前请先阅读[参与贡献](docs/contributing/index.md)和[认识 Panvara](docs/guides/concepts.md)，确认当前工具、能力边界与验证方式。
 
 最小提交前检查：
 
@@ -34,9 +34,8 @@ make test-e2e
 
 - 代码、配置、测试和文档表达同一个真实状态。
 - 新能力有可重复的最小示例与验收步骤。
-- 用户可感知的模块变化在同一提交中更新 `docs/modules/`。
-- 新模块登记到 `docs/_meta/modules.json`。
-- 快速开始受影响时同步更新 README 和 `docs/getting-started/`。
+- 用户可感知变化在同一提交中更新最相关的 `docs/guides/`、`docs/reference/` 或 `docs/releases/` 页面。
+- 首次使用路径受影响时同步更新 `docs/index.md`、`docs/getting-started/index.md` 和 README。
 - 已知限制、兼容风险和恢复方式没有被隐藏。
 
-文档章节与豁免规则见[文档同步规范](docs/contributing/documentation.md)。
+公开文档要求与 Pull Request 流程见[参与贡献](docs/contributing/index.md)。

@@ -3,51 +3,70 @@ layout: home
 
 hero:
   name: Panvara
-  text: 用模型搭建完整应用
-  tagline: 从一个可读的模型文件开始，获得 API、数据存储和管理界面描述，并用 Draft、Change Plan 与不可变 Release 安全管理模型变化。
+  text: 从数据模型到可运行 API
+  tagline: 用一份严格的 YAML 或 JSON 模型生成 HTTP 契约、PostgreSQL 数据能力和管理界面描述。
   actions:
     - theme: brand
-      text: 15 分钟开始验收
+      text: 10 分钟启动 Lite
       link: /getting-started/
     - theme: alt
-      text: 查看 CRM 示例
-      link: /modules/crm-leads
+      text: 运行 Server
+      link: /guides/server
+    - theme: alt
+      text: 查看能力状态
+      link: /releases/status
 
 features:
   - title: 模型驱动
-    details: 使用受控 YAML 或 JSON 描述数据和操作，Panvara 编译并校验后提供运行能力。
-  - title: 一套 Core，多种组合
-    details: Lite 适合最小运行，Server 加入 PostgreSQL 和业务 API；后续能力按真实场景拆分。
-  - title: 全球化原语
-    details: 项目从第一天明确语言、时区和币种，为全球身份、支付与消息 Provider 留出边界。
-  - title: 可验证的文档
-    details: 每个模块都必须给出前置条件、最小示例、验收步骤、限制和升级影响。
-  - title: 分阶段变化
-    details: alpha.3b 先验证并解释变化；P0-02a 再记录不可变发布事实，但不会激活、迁移或切换 Runtime。
+    details: 声明资源、字段、约束与开放操作，由 Panvara 统一校验并生成契约。
+  - title: Lite 与 Server
+    details: 先用无数据库的 Lite 验证安装，再用 PostgreSQL Server 运行真实 CRUD。
+  - title: 契约可查
+    details: 每个模块都能导出 OpenAPI 3.1 与 Manager UI Schema，便于客户端继续集成。
 ---
 
 <!--
     Panvara
-    docs/index.md    2026-07-14
+    docs index.md    2026-07-28
      ______     __  __     ______     ______     __     __
     /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
     \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
      \/\_____\  \ \_\ \_\  \ \_____\   /\_____\  \ \__/".~\_\
-      \/_____/   \/_/\/_/   \/_____/   \/_____/   \/_/   \/_/.com
+      \/_____/   \/_/\/_/   \/_____/   \/_/   \/_/.com
 
     @link    : https://github.com/shezw/panvara
     @author  : shezw
     @email   : hello@shezw.com
 -->
 
-## 当前可以验收什么？
+## Panvara 适合谁？
 
-`v0.1.0-alpha.2` 已经打通一条真实链路：读取 CRM Leads 模型、生成内部模型与接口描述、连接 PostgreSQL、通过 Public/Admin API 创建和查询数据，并在 Server 重启后保留数据。当前开发分支继续提供 alpha.3a Registry、alpha.3b Draft/Validate/Plan 与 P0-02a Publish Facts 三个可独立验收的控制面切片。
+Panvara 面向想快速验证数据型应用的个人与中小开发团队。你维护可读的 AppModule，Panvara 负责把模型编译为稳定标识、HTTP API、PostgreSQL Record 能力，以及供前端消费的界面描述。
 
-::: warning 这是实验版本
-当前版本适合开发、学习和架构验证，不应直接承载生产业务。Draft 与 Plan 只准备变化，Publish 只记录事实；Manager 页面、模块激活、迁移与回滚、完整身份系统、Provider、Outbox 和分布式运行仍在后续阶段。
+它适合本地原型、学习和技术评估。它目前不是托管平台，也不是无需开发即可交付的 CRM 或管理后台。
+
+::: info Current Distribution
+当前二进制内建的 Distribution 标识是 **v0.1.0-alpha.2**。可使用 Lite、严格 YAML/JSON AppModule、PostgreSQL Server、CRM CRUD、HTTP API、OpenAPI 3.1 和 Manager UI Schema。
 :::
 
-`server` 当前表示一条可以运行和验收的纵向切片，并非 Server Core 已完成。请从[当前 Server 架构事实](/architecture-review-server-current)核对现状，从 [Server Core 能力清单](/roadmap/server-core)与 [Manager 范围及验收](/roadmap/manager)查看后续完整范围。
+## 现在能完成什么？
 
-从[使用与验收 Guideline](/getting-started/)开始，不需要先读完整架构文档。已经完成 Registry 验收时，可以依次进入 [Draft → Validate → Plan](/getting-started/draft-plan-acceptance)与 [Draft → Publish](/getting-started/draft-publish-acceptance)。
+从当前 Distribution 出发，你可以：
+
+- 不连接数据库启动 Lite，并检查进程健康、就绪状态和版本；
+- 用 AppModule 声明资源、字段、约束、Public Create 与 Admin CRUD；
+- 启动 PostgreSQL Server，创建、查询、修改和软删除 Record；
+- 运行 CRM Leads 示例，并验证 Server 重启后数据仍然存在；
+- 下载由当前模块生成的 OpenAPI 与 Manager UI Schema。
+
+源码仓库中另有明确隔离的模型变更与访问管理预览。它们不属于当前 Distribution 能力边界，入口位于[使用指南](/guides/)的 Source Preview 分区。
+
+::: danger Planned / Unavailable
+可视化 Manager、模型 Activate/Rollback、自动数据升级、账号登录、支付、后台 Worker 和分布式控制面目前不可用。
+:::
+
+## 生产使用边界
+
+**当前 Distribution 能力边界不适合直接承载生产业务。** 当前协议仍处于 alpha，尚未提供稳定升级承诺、完整身份系统、生产级边缘安全、自动模型升级或灾难恢复流程。
+
+如果你要快速判断环境是否可运行，从[快速开始](/getting-started/)开始；如果你需要评估功能是否存在，先查看[能力状态](/releases/status)。

@@ -17,6 +17,17 @@ import { withMermaid } from "vitepress-plugin-mermaid";
 
 const docsBase = process.env.PANVARA_DOCS_BASE ?? "/";
 const docsSourceBranch = process.env.PANVARA_DOCS_SOURCE_BRANCH ?? "main";
+const docsSiteUrl =
+  process.env.PANVARA_DOCS_SITE_URL ?? "https://shezw.github.io/panvara/";
+
+const publicNavigation = [
+  { text: "概览", link: "/" },
+  { text: "快速开始", link: "/getting-started/" },
+  { text: "使用指南", link: "/guides/" },
+  { text: "API 与配置", link: "/reference/http-api" },
+  { text: "版本与兼容", link: "/releases/status" },
+  { text: "参与贡献", link: "/contributing/" },
+];
 
 export default withMermaid(
   defineConfig({
@@ -27,7 +38,15 @@ export default withMermaid(
     description: "数据模型驱动的可组合全栈框架",
     cleanUrls: true,
     lastUpdated: true,
-    srcExclude: ["_meta/**", "_templates/**"],
+    srcExclude: [
+      ".agent/**",
+      "**/.agent/**",
+      "_meta/**",
+      "_templates/**",
+    ],
+    sitemap: {
+      hostname: docsSiteUrl,
+    },
     head: [
       ["meta", { name: "theme-color", content: "#635bff" }],
       ["meta", { name: "viewport", content: "width=device-width, initial-scale=1" }],
@@ -40,97 +59,65 @@ export default withMermaid(
     },
     themeConfig: {
       siteTitle: "Panvara",
-      nav: [
-        { text: "开始", link: "/getting-started/" },
-        { text: "模块", link: "/modules/" },
-        {
-          text: "路线图",
-          items: [
-            { text: "当前 Server 事实", link: "/architecture-review-server-current" },
-            { text: "P0-02a 发布实现审计", link: "/architecture-review-release-publish" },
-            { text: "P0-01b 访问管理 ADR", link: "/adr/0005-project-local-access-administration" },
-            { text: "P0-02a 发布事实 ADR", link: "/adr/0006-immutable-module-release-publish-facts" },
-            { text: "Server Core", link: "/roadmap/server-core" },
-            { text: "Manager", link: "/roadmap/manager" },
-          ],
-        },
-        { text: "参考", link: "/reference/commands" },
-        { text: "架构", link: "/arch" },
-        {
-          text: "v0.1.0-alpha.2",
-          items: [
-            { text: "当前版本边界", link: "/core-v0" },
-            { text: "测试体系", link: "/testing" },
-          ],
-        },
-      ],
-      sidebar: [
-        {
-          text: "开始",
-          items: [
-            { text: "使用与验收 Guideline", link: "/getting-started/" },
-            { text: "安装开发工具", link: "/getting-started/prerequisites" },
-            { text: "创建本地环境", link: "/getting-started/local-environment" },
-            { text: "编译并运行 Lite", link: "/getting-started/build-and-lite" },
-            { text: "CRM Leads 完整验收", link: "/getting-started/crm-leads-acceptance" },
-            { text: "Revision Registry 验收", link: "/getting-started/revision-registry-acceptance" },
-            { text: "Draft 与 Plan 验收", link: "/getting-started/draft-plan-acceptance" },
-            { text: "Draft 与 Publish 验收", link: "/getting-started/draft-publish-acceptance" },
-            { text: "故障排查", link: "/getting-started/troubleshooting" },
-          ],
-        },
-        {
-          text: "模块指南",
-          items: [
-            { text: "模块总览", link: "/modules/" },
-            { text: "CRM Leads 示例", link: "/modules/crm-leads" },
-            { text: "AppModule", link: "/modules/appmodule" },
-            { text: "Revision Registry", link: "/modules/revision-registry" },
-            { text: "Draft 与 Change Plan", link: "/modules/draft-planning" },
-            { text: "Module Release 发布事实", link: "/modules/release-publishing" },
-            { text: "Record Runtime", link: "/modules/record-runtime" },
-            { text: "HTTP API", link: "/modules/http-api" },
-            { text: "运行模式", link: "/modules/runtime-profiles" },
-            { text: "项目上下文", link: "/modules/project-context" },
-            { text: "执行作用域与访问内核", link: "/modules/project-access" },
-            { text: "Project-local 访问管理", link: "/modules/access-administration" },
-          ],
-        },
-        {
-          text: "架构与路线",
-          items: [
-            { text: "总体架构", link: "/arch" },
-            { text: "当前 Server 架构事实", link: "/architecture-review-server-current" },
-            { text: "P0-02a 发布实现审计", link: "/architecture-review-release-publish" },
-            { text: "Server Core 能力清单", link: "/roadmap/server-core" },
-            { text: "Manager 范围与验收", link: "/roadmap/manager" },
-            { text: "Core v0 路线", link: "/core-v0" },
-          ],
-        },
-        {
-          text: "参考",
-          items: [
-            { text: "命令参考", link: "/reference/commands" },
-            { text: "配置参考", link: "/reference/configuration" },
-          ],
-        },
-        {
-          text: "参与开发",
-          items: [
-            { text: "开发环境", link: "/development" },
-            { text: "部署到 GitHub Pages", link: "/deployment/github-pages" },
-            { text: "文档同步规范", link: "/contributing/documentation" },
-            { text: "模块指南模板", link: "/contributing/module-guide-template" },
-            { text: "验证测试框架", link: "/testing" },
-            { text: "ADR-0001 身份拆分", link: "/adr/0001-module-data-revision-identities" },
-            { text: "ADR-0002 不可变 Registry", link: "/adr/0002-immutable-revision-registry" },
-            { text: "ADR-0003 Draft 与 Plan", link: "/adr/0003-draft-validation-change-plan" },
-            { text: "ADR-0004 执行作用域与访问内核", link: "/adr/0004-persistent-execution-scope-access-kernel" },
-            { text: "ADR-0005 Project-local 访问管理", link: "/adr/0005-project-local-access-administration" },
-            { text: "ADR-0006 不可变发布事实", link: "/adr/0006-immutable-module-release-publish-facts" },
-          ],
-        },
-      ],
+      nav: publicNavigation,
+      sidebar: {
+        "/getting-started/": [
+          {
+            text: "快速开始",
+            items: [
+              { text: "10 分钟启动 Lite", link: "/getting-started/" },
+            ],
+          },
+        ],
+        "/guides/": [
+          {
+            text: "Current Distribution",
+            items: [
+              { text: "使用指南", link: "/guides/" },
+              { text: "认识 Panvara", link: "/guides/concepts" },
+              { text: "运行 Server", link: "/guides/server" },
+              { text: "定义 AppModule", link: "/guides/appmodule" },
+              { text: "CRM Leads", link: "/guides/crm-leads" },
+              { text: "操作 Record", link: "/guides/records" },
+            ],
+          },
+          {
+            text: "Source Preview",
+            items: [
+              { text: "访问管理预览", link: "/guides/access-preview" },
+              { text: "模型变更预览", link: "/guides/model-change-preview" },
+            ],
+          },
+        ],
+        "/reference/": [
+          {
+            text: "API 与配置",
+            items: [
+              { text: "HTTP API", link: "/reference/http-api" },
+              { text: "配置参考", link: "/reference/configuration" },
+              { text: "命令参考", link: "/reference/commands" },
+              { text: "故障排查", link: "/reference/troubleshooting" },
+            ],
+          },
+        ],
+        "/releases/": [
+          {
+            text: "版本与兼容",
+            items: [
+              { text: "能力状态", link: "/releases/status" },
+              { text: "数据与升级", link: "/releases/compatibility" },
+            ],
+          },
+        ],
+        "/contributing/": [
+          {
+            text: "参与贡献",
+            items: [
+              { text: "贡献指南", link: "/contributing/" },
+            ],
+          },
+        ],
+      },
       search: {
         provider: "local",
         options: {

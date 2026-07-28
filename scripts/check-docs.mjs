@@ -1,6 +1,6 @@
 /*
    Panvara
-   scripts/check-docs.mjs    2026-07-15
+   scripts/check-docs.mjs    2026-07-28
     ______     __  __     ______     ______     __     __
    /\  ___\   /\ \_\ \   /\  ___\   /\___  \   /\ \  _ \ \
    \ \___  \  \ \  __ \  \ \  __\   \/_/  /__  \ \ \/ ".\ \
@@ -18,47 +18,35 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
+const snapshotRevision = "38afe3e91e5a54c1a677b0acbe3a6a2a75668839";
 
 const requiredPages = [
   "docs/index.md",
   "docs/getting-started/index.md",
-  "docs/getting-started/prerequisites.md",
-  "docs/getting-started/local-environment.md",
-  "docs/getting-started/build-and-lite.md",
-  "docs/getting-started/crm-leads-acceptance.md",
-  "docs/getting-started/revision-registry-acceptance.md",
-  "docs/getting-started/draft-plan-acceptance.md",
-  "docs/getting-started/draft-publish-acceptance.md",
-  "docs/getting-started/troubleshooting.md",
-  "docs/development.md",
-  "docs/architecture-review-server-current.md",
-  "docs/architecture-review-release-publish.md",
-  "docs/roadmap/server-core.md",
-  "docs/roadmap/manager.md",
-  "docs/reference/commands.md",
+  "docs/guides/index.md",
+  "docs/guides/concepts.md",
+  "docs/guides/server.md",
+  "docs/guides/appmodule.md",
+  "docs/guides/crm-leads.md",
+  "docs/guides/records.md",
+  "docs/guides/access-preview.md",
+  "docs/guides/model-change-preview.md",
+  "docs/reference/http-api.md",
   "docs/reference/configuration.md",
-  "docs/contributing/documentation.md",
-  "docs/contributing/module-guide-template.md",
-  "docs/adr/0001-module-data-revision-identities.md",
-  "docs/adr/0002-immutable-revision-registry.md",
-  "docs/adr/0003-draft-validation-change-plan.md",
-  "docs/adr/0004-persistent-execution-scope-access-kernel.md",
-  "docs/adr/0005-project-local-access-administration.md",
-  "docs/adr/0006-immutable-module-release-publish-facts.md",
-  "docs/modules/access-administration.md",
-  "docs/modules/release-publishing.md",
+  "docs/reference/commands.md",
+  "docs/reference/troubleshooting.md",
+  "docs/releases/status.md",
+  "docs/releases/compatibility.md",
+  "docs/contributing/index.md",
 ];
 
-const moduleHeadings = [
-  "## 用途",
-  "## 当前状态",
-  "## 前置条件",
-  "## 最小示例",
-  "## 配置",
-  "## 验收",
-  "## 常见问题",
-  "## 当前限制",
-  "## 兼容与升级",
+const expectedNavigation = [
+  { text: "概览", link: "/" },
+  { text: "快速开始", link: "/getting-started/" },
+  { text: "使用指南", link: "/guides/" },
+  { text: "API 与配置", link: "/reference/http-api" },
+  { text: "版本与兼容", link: "/releases/status" },
+  { text: "参与贡献", link: "/contributing/" },
 ];
 
 function absolute(relativePath) {
@@ -73,180 +61,208 @@ function requirePath(relativePath, kind = "路径") {
   return true;
 }
 
+function requireFragments(relativePath, fragments) {
+  if (!requirePath(relativePath, "内容门禁文件")) {
+    return;
+  }
+  const content = fs.readFileSync(absolute(relativePath), "utf8");
+  for (const fragment of fragments) {
+    if (!content.includes(fragment)) {
+      failures.push(`${relativePath} 缺少公开边界声明: ${fragment}`);
+    }
+  }
+}
+
+function listMarkdownFiles(directory) {
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === ".vitepress") {
+      continue;
+    }
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listMarkdownFiles(entryPath));
+    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      files.push(path.relative(root, entryPath).split(path.sep).join("/"));
+    }
+  }
+  return files.sort();
+}
+
 for (const page of requiredPages) {
-  requirePath(page, "基础文档");
+  requirePath(page, "公开文档");
 }
 
-const checkoutGuides = [
-  "docs/getting-started/local-environment.md",
-  "docs/development.md",
-];
-for (const guidePath of checkoutGuides) {
-  if (!fs.existsSync(absolute(guidePath))) {
+const allowedPages = new Set(requiredPages);
+const actualPages = listMarkdownFiles(absolute("docs"));
+for (const page of actualPages) {
+  if (!allowedPages.has(page)) {
+    failures.push(`非公开 Markdown 仍位于 docs: ${page}`);
+  }
+}
+
+for (const publicFile of ["README.md", ...requiredPages]) {
+  if (!fs.existsSync(absolute(publicFile))) {
     continue;
   }
-  const guide = fs.readFileSync(absolute(guidePath), "utf8");
-  if (guide.includes("codex/alpha2-model-runtime")) {
-    failures.push(`本地开发指南仍引用已过期的 alpha.2 分支: ${guidePath}`);
-  }
-  if (!guide.includes("codex/alpha3b-draft-plan")) {
-    failures.push(`本地开发指南缺少当前 alpha.3b 验收分支: ${guidePath}`);
-  }
-}
-
-const manifestPath = "docs/_meta/modules.json";
-if (!requirePath(manifestPath, "模块文档清单")) {
-  finish();
-}
-
-let manifest;
-try {
-  manifest = JSON.parse(fs.readFileSync(absolute(manifestPath), "utf8"));
-} catch (error) {
-  failures.push(`模块文档清单不是有效 JSON: ${error.message}`);
-  finish();
-}
-
-if (manifest.schemaVersion !== 1) {
-  failures.push(`modules.json schemaVersion 必须为 1，实际为 ${manifest.schemaVersion}`);
-}
-
-if (!Array.isArray(manifest.modules) || manifest.modules.length === 0) {
-  failures.push("modules.json 至少需要一个 modules 条目");
-}
-
-const ids = new Set();
-const guides = new Set();
-for (const module of manifest.modules ?? []) {
-  const label = module.id || "<missing-id>";
-  if (!module.id || ids.has(module.id)) {
-    failures.push(`模块 ID 缺失或重复: ${label}`);
-  }
-  ids.add(module.id);
-
-  if (!module.guide || guides.has(module.guide)) {
-    failures.push(`模块 ${label} 的 guide 缺失或重复`);
-  }
-  guides.add(module.guide);
-
-  if (!Array.isArray(module.sourcePaths) || module.sourcePaths.length === 0) {
-    failures.push(`模块 ${label} 没有 sourcePaths`);
-  }
-  for (const sourcePath of module.sourcePaths ?? []) {
-    requirePath(sourcePath, `模块 ${label} 的源码路径`);
-  }
-
-  if (!Array.isArray(module.acceptance) || module.acceptance.length === 0) {
-    failures.push(`模块 ${label} 没有可执行的 acceptance 命令`);
-  }
-
-  if (!module.guide || !requirePath(module.guide, `模块 ${label} 的指南`)) {
-    continue;
-  }
-  const guide = fs.readFileSync(absolute(module.guide), "utf8");
-  for (const heading of moduleHeadings) {
-    if (!guide.includes(heading)) {
-      failures.push(`模块 ${label} 的指南缺少章节: ${heading}`);
+  const content = fs.readFileSync(absolute(publicFile), "utf8");
+  for (const retiredClaim of [
+    "当前正式发行版",
+    "当前正式发行口径",
+    "正式发行的 **Current Distribution**",
+  ]) {
+    if (content.includes(retiredClaim)) {
+      failures.push(`${publicFile} 虚构了尚不存在的 GitHub Release: ${retiredClaim}`);
     }
   }
 }
 
-const exampleDirectory = absolute("examples/modules");
-const exampleSources = fs.existsSync(exampleDirectory)
-  ? fs
-      .readdirSync(exampleDirectory)
-      .filter((name) => /\.(json|ya?ml)$/i.test(name))
-      .map((name) => path.posix.join("examples/modules", name))
-      .sort()
-  : [];
-const mappedSources = new Set(manifest.appModuleSources ?? []);
-for (const source of exampleSources) {
-  if (!mappedSources.has(source)) {
-    failures.push(`示例 AppModule 尚未登记对应指南: ${source}`);
-  }
-}
-for (const source of mappedSources) {
-  requirePath(source, "已登记的示例 AppModule");
+if (fs.existsSync(absolute("docs/.agent"))) {
+  failures.push("docs/.agent 不得进入 VitePress 源目录");
 }
 
-const draftFixturePaths = {
-  invalid: "examples/drafts/crm-leads-invalid.yaml",
-  valid: "examples/drafts/crm-leads-valid.yaml",
-};
-for (const fixture of Object.values(draftFixturePaths)) {
-  requirePath(fixture, "Draft Golden Path Fixture");
-}
-
-if (Object.values(draftFixturePaths).every((fixture) => fs.existsSync(absolute(fixture)))) {
-  const invalidFixture = fs.readFileSync(absolute(draftFixturePaths.invalid), "utf8");
-  const validFixture = fs.readFileSync(absolute(draftFixturePaths.valid), "utf8");
-  if (!invalidFixture.includes("version: 1.0.0") ||
-      !invalidFixture.includes("options: [new, qualified, won, won]")) {
-    failures.push("无效 Draft Fixture 必须稳定包含重复 enum option");
-  }
-  if (!validFixture.includes("version: 1.1.0") ||
-      !validFixture.includes("options: [new, contacted, qualified, won]")) {
-    failures.push("有效 Draft Fixture 必须稳定包含 1.1.0 与新增 contacted option");
-  }
-}
-
-const draftAcceptancePath = "docs/getting-started/draft-plan-acceptance.md";
-if (fs.existsSync(absolute(draftAcceptancePath))) {
-  const acceptance = fs.readFileSync(absolute(draftAcceptancePath), "utf8");
-  const requiredFragments = [
-    "baseline_revision=", "Idempotency-Key", "--data-binary @examples/drafts/",
-    ".draft_id", ".draft_version", ".validation_id", ".validation_format",
-    ".candidate_revision", ".data_schema_identities", ".violations",
-    ".plan_id", ".plan_format", ".summary.classification",
-    ".migration_execution_supported", "X-Panvara-Source-Hash",
-  ];
-  for (const fragment of requiredFragments) {
-    if (!acceptance.includes(fragment)) {
-      failures.push(`Draft Golden Path 缺少实际 HTTP 契约片段: ${fragment}`);
-    }
-  }
-  const retiredFragments = [
-    ".draft_generation", ".format_version", ".issues_hash",
-    ".candidate.revision_hash", ".risk_summary", "jq -er '.id'",
-  ];
-  for (const fragment of retiredFragments) {
-    if (acceptance.includes(fragment)) {
-      failures.push(`Draft Golden Path 仍使用已废弃的 HTTP 字段: ${fragment}`);
-    }
-  }
-}
-
-const publishAcceptancePath = "docs/getting-started/draft-publish-acceptance.md";
-if (fs.existsSync(absolute(publishAcceptancePath))) {
-  const acceptance = fs.readFileSync(absolute(publishAcceptancePath), "utf8");
-  const requiredFragments = [
-    ".release_id", ".plan_id", ".candidate_revision",
-    ".data_schema_identity.format", ".published_credential_id",
-    ".effects.revision_registered == true", ".effects.published == true",
-    ".effects.activated == false", ".effects.records_migrated == false",
-    ".effects.runtime_changed == false", ".effects.activation_supported == false",
-    "Idempotency-Key", "Cache-Control: private, no-store",
-    "RUNTIME_BEFORE", "publish-records-before", "重启后再验证",
-  ];
-  for (const fragment of requiredFragments) {
-    if (!acceptance.includes(fragment)) {
-      failures.push(`Publish Golden Path 缺少实际 HTTP 契约片段: ${fragment}`);
-    }
-  }
-}
-
-finish();
-
-function finish() {
-  if (failures.length > 0) {
-    console.error("Panvara 文档约束检查失败:");
-    for (const failure of failures) {
-      console.error(`- ${failure}`);
-    }
-    process.exit(1);
-  }
-  console.log(
-    `Panvara 文档约束检查通过：${manifest.modules.length} 个模块指南，${exampleSources.length} 个示例 AppModule，${Object.keys(draftFixturePaths).length} 个 Draft Fixture。`,
+const configPath = "docs/.vitepress/config.mts";
+if (requirePath(configPath, "VitePress 配置")) {
+  const config = fs.readFileSync(absolute(configPath), "utf8");
+  const navigationMatch = config.match(
+    /const publicNavigation = \[([\s\S]*?)\];/,
   );
-  process.exit(0);
+
+  if (!navigationMatch) {
+    failures.push("VitePress 配置缺少 publicNavigation");
+  } else {
+    const actualNavigation = [
+      ...navigationMatch[1].matchAll(
+        /\{\s*text:\s*"([^"]+)",\s*link:\s*"([^"]+)"\s*\}/g,
+      ),
+    ].map((match) => ({ text: match[1], link: match[2] }));
+
+    if (JSON.stringify(actualNavigation) !== JSON.stringify(expectedNavigation)) {
+      failures.push(
+        `一级导航必须按约定保留 6 项，实际为: ${JSON.stringify(actualNavigation)}`,
+      );
+    }
+  }
+
+  if (!config.includes("nav: publicNavigation")) {
+    failures.push("VitePress themeConfig.nav 必须使用 publicNavigation");
+  }
+
+  for (const excludedSource of [
+    '".agent/**"',
+    '"**/.agent/**"',
+    '"_meta/**"',
+    '"_templates/**"',
+  ]) {
+    if (!config.includes(excludedSource)) {
+      failures.push(`VitePress srcExclude 缺少: ${excludedSource}`);
+    }
+  }
+
+  if (!config.includes("sitemap:") || !config.includes("hostname: docsSiteUrl")) {
+    failures.push("VitePress 必须生成受公开页面边界约束的 sitemap");
+  }
+
+  for (const retiredRoute of [
+    '"/adr/',
+    '"/modules/',
+    '"/roadmap/',
+    '"/deployment/',
+    '"/architecture-review',
+    '"/core-v0"',
+    '"/development"',
+    '"/testing"',
+  ]) {
+    if (config.includes(retiredRoute)) {
+      failures.push(`VitePress 导航仍暴露旧内部路由: ${retiredRoute}`);
+    }
+  }
 }
+
+requireFragments("README.md", [
+  "v0.1.0-alpha.2",
+  "当前二进制内建 Distribution 标识",
+  "当前尚无对应 GitHub Release",
+  snapshotRevision,
+  "5–10 分钟启动 Lite",
+  "make doctor",
+  "make build",
+  "make run",
+  "docs/getting-started/index.md",
+  "docs/guides/index.md",
+  "docs/reference/http-api.md",
+  "docs/releases/status.md",
+  "docs/contributing/index.md",
+]);
+
+requireFragments("CONTRIBUTING.md", [
+  "docs/contributing/index.md",
+  "docs/guides/concepts.md",
+  "docs/guides/",
+  "docs/reference/",
+  "docs/releases/",
+  "docs/index.md",
+  "docs/getting-started/index.md",
+  "README",
+]);
+if (requirePath("CONTRIBUTING.md", "贡献指南")) {
+  const contributing = fs.readFileSync(absolute("CONTRIBUTING.md"), "utf8");
+  for (const retiredPath of [
+    "docs/development.md",
+    "docs/arch.md",
+    "docs/contributing/documentation.md",
+    "docs/modules/",
+    "docs/_meta/modules.json",
+    ".agent",
+  ]) {
+    if (contributing.includes(retiredPath)) {
+      failures.push(`CONTRIBUTING.md 仍暴露旧内部路径: ${retiredPath}`);
+    }
+  }
+}
+
+requireFragments("docs/getting-started/index.md", [
+  "v0.1.0-alpha.2",
+  snapshotRevision,
+  `git switch --detach ${snapshotRevision}`,
+]);
+requireFragments("docs/guides/appmodule.md", [
+  `https://github.com/shezw/panvara/blob/${snapshotRevision}/examples/modules/crm-leads.yaml`,
+]);
+if (requirePath("docs/guides/appmodule.md", "AppModule 指南")) {
+  const appModuleGuide = fs.readFileSync(
+    absolute("docs/guides/appmodule.md"),
+    "utf8",
+  );
+  if (appModuleGuide.includes("blob/main/examples/modules/crm-leads.yaml")) {
+    failures.push("AppModule 示例链接不得漂移到 main，必须固定源码快照");
+  }
+}
+
+requireFragments("docs/releases/status.md", [
+  "Current Distribution",
+  "Source Preview",
+  "Planned / Unavailable",
+  "v0.1.0-alpha.2",
+  "尚无对应 GitHub Release",
+]);
+requireFragments("docs/guides/access-preview.md", [
+  "Source Preview",
+  "v0.1.0-alpha.2",
+]);
+requireFragments("docs/guides/model-change-preview.md", [
+  "Source Preview",
+  "v0.1.0-alpha.2",
+]);
+
+if (failures.length > 0) {
+  console.error("Panvara 公开文档边界检查失败:");
+  for (const failure of failures) {
+    console.error(`- ${failure}`);
+  }
+  process.exit(1);
+}
+
+console.log(
+  `Panvara 公开文档边界检查通过：${requiredPages.length} 个公开页面，${expectedNavigation.length} 个一级导航。`,
+);

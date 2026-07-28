@@ -5,7 +5,26 @@
 # @author  : shezw
 # @email   : hello@shezw.com
 
-.agent/
+# Agent workflow records stay local; durable internal knowledge is versioned.
+/.agent/*
+!/.agent/architecture/
+!/.agent/architecture/**
+!/.agent/development/
+!/.agent/development/**
+!/.agent/meta/
+!/.agent/meta/**
+!/.agent/operations/
+!/.agent/operations/**
+!/.agent/product/
+!/.agent/product/**
+!/.agent/reviews/
+!/.agent/reviews/**
+!/.agent/templates/
+!/.agent/templates/**
+!/.agent/tests/
+/.agent/tests/*
+!/.agent/tests/manual/
+!/.agent/tests/manual/**
 
 # Go
 /bin/
