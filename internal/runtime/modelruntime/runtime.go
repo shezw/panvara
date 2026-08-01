@@ -219,6 +219,15 @@ func (runtime *Runtime) Degraded() bool {
 	return runtime != nil && runtime.degraded.Load()
 }
 
+// FailClosed permanently rejects new work in this process. It is used when a
+// database COMMIT may have advanced the authoritative epoch but its result was
+// lost, so serving the previously installed Snapshot would be unsafe.
+func (runtime *Runtime) FailClosed() {
+	if runtime != nil {
+		runtime.degraded.Store(true)
+	}
+}
+
 // Current returns the currently published immutable Snapshot, or nil.
 func (runtime *Runtime) Current() *Snapshot {
 	if runtime == nil {

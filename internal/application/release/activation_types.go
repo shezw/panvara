@@ -66,4 +66,7 @@ type PreparedRuntime interface {
 type Runtime interface {
 	Prepare(context.Context, domainmodule.Revision, string) (PreparedRuntime, error)
 	Install(domainrelease.ActiveSnapshot, PreparedRuntime) error
+	// FailClosed immediately rejects new work when storage may have committed an
+	// epoch that this process cannot prove it installed.
+	FailClosed()
 }

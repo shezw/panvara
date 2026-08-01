@@ -31,6 +31,9 @@ var (
 	ErrNotActivatable = errors.New("module release is not activatable")
 	// ErrActivationConflict reports a stale active baseline or prohibited reactivation.
 	ErrActivationConflict = errors.New("module release activation conflict")
+	// ErrActivationOutcomeUnknown reports a lost PostgreSQL COMMIT result. The
+	// caller must fail closed because the authoritative epoch may have advanced.
+	ErrActivationOutcomeUnknown = errors.New("module release activation outcome is unknown")
 	// ErrCorrupt reports persisted facts that fail identity or chain verification.
 	ErrCorrupt = errors.New("module release storage is corrupt")
 	// ErrUnavailable reports an inability to read or atomically persist release facts.

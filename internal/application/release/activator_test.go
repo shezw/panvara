@@ -17,6 +17,7 @@ package release
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -244,6 +245,22 @@ func TestActivatorNormalizesStoreRevisionAndRuntimeFailures(t *testing.T) {
 			fixture.runtime.installCalls != 0 {
 			t.Fatalf("Activate(CAS conflict) = %v, runtime calls %d/%d", err,
 				fixture.runtime.prepareCalls, fixture.runtime.installCalls)
+		}
+	})
+	t.Run("unknown commit outcome fails runtime closed", func(t *testing.T) {
+		fixture := newActivationFixture(t)
+		fixture.store.activateErr = fmt.Errorf(
+			"commit reply lost: %w: %w",
+			ErrActivationOutcomeUnknown,
+			context.Canceled,
+		)
+		_, _, err := fixture.activator.Activate(
+			context.Background(), fixture.invocation, "notes", fixture.target.ID().String(),
+		)
+		if !errors.Is(err, ErrActivationOutcomeUnknown) || fixture.runtime.failClosedCalls != 1 ||
+			fixture.runtime.installCalls != 0 {
+			t.Fatalf("Activate(unknown commit) = %v, fail closed/install calls %d/%d", err,
+				fixture.runtime.failClosedCalls, fixture.runtime.installCalls)
 		}
 	})
 	t.Run("install unavailable after commit", func(t *testing.T) {
@@ -587,6 +604,7 @@ type activationTestRuntime struct {
 	installed         domainrelease.ActiveSnapshot
 	prepareCalls      int
 	installCalls      int
+	failClosedCalls   int
 }
 
 func (runtime *activationTestRuntime) Prepare(
@@ -618,3 +636,5 @@ func (runtime *activationTestRuntime) Install(
 	runtime.installed = active
 	return runtime.installErr
 }
+
+func (runtime *activationTestRuntime) FailClosed() { runtime.failClosedCalls++ }

@@ -242,6 +242,33 @@ func TestRuntimeInstallConflictDegradesAndFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRuntimeExplicitFailClosedRejectsRequestsAndFuturePreparation(t *testing.T) {
+	t.Parallel()
+	revision := modelRuntimeRevision(t, "1.0.0", nil)
+	namespace := modelRuntimeHash("a")
+	runtime := mustModelRuntime(t, responseModelRuntimeBuilder())
+	prepared := mustPrepare(t, runtime, revision, namespace)
+	if err := runtime.Install(modelRuntimeActive(t, revision, namespace, 1), prepared); err != nil {
+		t.Fatal(err)
+	}
+
+	runtime.FailClosed()
+	if runtime.Ready() || !runtime.Degraded() {
+		t.Fatalf("FailClosed readiness = %v, degraded = %v", runtime.Ready(), runtime.Degraded())
+	}
+	response := httptest.NewRecorder()
+	runtime.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("ServeHTTP(after FailClosed) status = %d", response.Code)
+	}
+	if _, err := runtime.Prepare(context.Background(), revision, namespace); !errors.Is(err, ErrDegraded) {
+		t.Fatalf("Prepare(after FailClosed) error = %v, want ErrDegraded", err)
+	}
+	if err := runtime.Install(modelRuntimeActive(t, revision, namespace, 1), prepared); !errors.Is(err, ErrDegraded) {
+		t.Fatalf("Install(after FailClosed) error = %v, want ErrDegraded", err)
+	}
+}
+
 func TestRuntimeInstallRejectsPreparedSnapshotMismatch(t *testing.T) {
 	t.Parallel()
 	firstRevision := modelRuntimeRevision(t, "1.0.0", nil)

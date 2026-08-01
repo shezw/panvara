@@ -54,12 +54,15 @@ func normalizeStoreError(action string, err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, ErrActivationOutcomeUnknown) {
+		return fmt.Errorf("%s: %w", action, err)
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
 	for _, stable := range []error{
 		ErrInvalid, ErrNotFound, ErrStale, ErrNotPublishable, ErrIdempotencyConflict,
-		ErrNotActivatable, ErrActivationConflict, ErrCorrupt, ErrUnavailable,
+		ErrNotActivatable, ErrActivationConflict, ErrActivationOutcomeUnknown, ErrCorrupt, ErrUnavailable,
 		access.ErrUnauthenticated, access.ErrForbidden, access.ErrScopeInactive,
 	} {
 		if errors.Is(err, stable) {

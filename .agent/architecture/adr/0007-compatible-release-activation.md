@@ -67,7 +67,7 @@ Candidate Source 在写 active pointer 前重新编译，并逐字节核对 Cano
 
 数据库提交成功后，Server 通过一个 `atomic.Pointer` 安装新 Runtime。HTTP 请求在入口只加载一次 pointer，在途请求完整使用旧 epoch，后续请求完整使用新 epoch，不允许逐字段热改 Handler 或 Validator。Install 只接受更大的 epoch；同 epoch/同内容幂等，更小 epoch 被拒绝，同 epoch/不同内容使 Runtime 进入不可用状态。
 
-数据库提交与进程内 pointer 交换不构成同一个 ACID 事务。Prepare 必须在提交前完成，使正常 Install 成为不可失败的内存交换；若检测到提交后不一致，readiness 立即失败。进程若在数据库提交后、内存安装前崩溃，重启从数据库 active pointer 恢复。
+数据库提交与进程内 pointer 交换不构成同一个 ACID 事务。Prepare 必须在提交前完成，使正常 Install 成为不可失败的内存交换；若 `COMMIT` 回包丢失导致结果不确定，或检测到提交后不一致，当前实例立即 fail closed，业务请求与 readiness 均返回 503。进程重启后从数据库 active pointer 唯一权威恢复，不能在连接恢复后继续提供未核对的旧 Snapshot。
 
 ## HTTP 契约
 

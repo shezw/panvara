@@ -407,7 +407,12 @@ func sameProjectScope(left, right project.Scope) bool {
 
 func commitReleaseActivation(ctx context.Context, tx pgx.Tx, action string) error {
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit PostgreSQL %s: %w", action, err)
+		return fmt.Errorf(
+			"%w: commit PostgreSQL %s: %w",
+			releaseapp.ErrActivationOutcomeUnknown,
+			action,
+			err,
+		)
 	}
 	return nil
 }

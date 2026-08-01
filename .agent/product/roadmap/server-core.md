@@ -209,7 +209,7 @@ P0 是进入 `feature-complete` 的必要条件，优先级高于完整 Manager 
   - 不能误判完成：Change Plan 能识别 `requires_migration`、生成 SQL 文本、复制几条示例数据，或只在空数据库成功，都不算迁移能力完成。
 
 - [ ] **P0-04：Runtime Snapshot 固定与重启恢复**
-  - [x] **P0-04a：单进程 HTTP 请求固定。** `modelruntime` 在请求入口只加载一次不可变 Handler Snapshot；Install 单调且同 epoch 幂等，冲突使 readiness 失败。Server 重启从 PostgreSQL active pointer 重新编译并核对全部 Revision 制品。
+  - [x] **P0-04a：单进程 HTTP 请求固定。** `modelruntime` 在请求入口只加载一次不可变 Handler Snapshot；Install 单调且同 epoch 幂等，冲突或 PostgreSQL `COMMIT` 结果不确定会使实例永久 fail closed。Server 重启从 PostgreSQL active pointer 重新编译并核对全部 Revision 制品。
   - [ ] **P0-04b：完整执行与故障收敛。** Job/Event 固定、数据库短暂不可用期间的 last-known-good 策略、active epoch 观测与多节点状态仍未实现。
   - 交付：每个请求、Job、Event 在开始时固定 Project Release Snapshot/Epoch；Server 不再由可覆盖的本地 Source 隐式决定活动模型。
   - 验收门禁：Activate 与并发请求交错时，单次执行只能观察一个 epoch；重启、短暂数据库不可用和 last-known-good 恢复均有 E2E；落后或无法加载 active 制品的实例 readiness 失败。

@@ -16,6 +16,7 @@ package release
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -156,6 +157,9 @@ func (activator *Activator) Activate(
 		Expected: current, Release: target, Candidate: candidate, ActivatedAt: at,
 	})
 	if err != nil {
+		if errors.Is(err, ErrActivationOutcomeUnknown) {
+			activator.runtime.FailClosed()
+		}
 		normalized := normalizeStoreError("activate compatible module release", err)
 		if isAuthorizationFailure(normalized) {
 			activator.auditDenied(ctx, invocation, access.OperationReleaseActivate, normalized)
