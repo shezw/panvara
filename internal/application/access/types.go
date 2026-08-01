@@ -84,6 +84,10 @@ const (
 	OperationReleasePublish Operation = "release.publish"
 	// OperationReleaseGet authorizes reading one immutable module release fact.
 	OperationReleaseGet Operation = "release.get"
+	// OperationReleaseActivate authorizes atomically advancing the active Release epoch.
+	OperationReleaseActivate Operation = "release.activate"
+	// OperationReleaseGetActive authorizes reading the current active Release snapshot.
+	OperationReleaseGetActive Operation = "release.get_active"
 
 	// OperationPrincipalList authorizes listing project-local principals.
 	OperationPrincipalList Operation = "access.principal.list"
@@ -128,6 +132,8 @@ func (operation Operation) Valid() bool {
 		OperationDraftGetPlan,
 		OperationReleasePublish,
 		OperationReleaseGet,
+		OperationReleaseActivate,
+		OperationReleaseGetActive,
 		OperationPrincipalList,
 		OperationPrincipalCreate,
 		OperationPrincipalDisable,

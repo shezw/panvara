@@ -514,6 +514,9 @@ func TestPostgresMigrateUpgrades0005FactsForModulePublish(t *testing.T) {
 		t.Fatalf("Migrate(0005 -> current) error = %v", err)
 	}
 	checksums["0006_module_publish_facts.sql"] = embeddedMigrationChecksum(t, "0006_module_publish_facts.sql")
+	checksums["0007_compatible_release_activation.sql"] = embeddedMigrationChecksum(
+		t, "0007_compatible_release_activation.sql",
+	)
 	assertMigrationLedger(t, ctx, pool, checksums)
 	for table, want := range map[string]int{
 		"panvara_module_revision":         1,

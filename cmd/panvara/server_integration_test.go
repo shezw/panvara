@@ -142,6 +142,23 @@ type integrationRelease struct {
 	} `json:"effects"`
 }
 
+type integrationActiveSnapshot struct {
+	Module                  string  `json:"module"`
+	ReleaseID               *string `json:"release_id"`
+	RuntimeRevision         string  `json:"runtime_revision"`
+	RecordNamespaceRevision string  `json:"record_namespace_revision"`
+	DataSchemaIdentity      struct {
+		Format      int    `json:"format"`
+		Fingerprint string `json:"fingerprint"`
+	} `json:"data_schema_identity"`
+	Epoch                 uint64    `json:"epoch"`
+	Origin                string    `json:"origin"`
+	ActivatedBy           string    `json:"activated_by"`
+	ActivatedCredentialID *string   `json:"activated_credential_id"`
+	RequestID             string    `json:"request_id"`
+	ActivatedAt           time.Time `json:"activated_at"`
+}
+
 type integrationAccessPrincipal struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
@@ -658,6 +675,76 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		t.Fatal("Publish changed active OpenAPI or the existing Record")
 	}
 
+	activatePath := releasePath + "/activate"
+	activatedResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+activatePath,
+		testIntegrationAdminToken, "", "", http.StatusCreated, nil,
+	)
+	if activatedResponse.Header.Get("Location") !=
+		"/api/admin/core/v1alpha1/modules/crm.leads/active" ||
+		activatedResponse.Header.Get("ETag") != `"release-epoch-2"` ||
+		activatedResponse.Header.Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("Activate headers = %#v", activatedResponse.Header)
+	}
+	var activated integrationActiveSnapshot
+	if err := json.Unmarshal(activatedResponse.Body, &activated); err != nil {
+		t.Fatal(err)
+	}
+	if activated.Module != "crm.leads" || activated.ReleaseID == nil ||
+		*activated.ReleaseID != publishedRelease.ReleaseID ||
+		activated.RuntimeRevision != publishedRelease.CandidateRevision ||
+		activated.RecordNamespaceRevision != runtimeRevision || activated.Epoch != 2 ||
+		activated.Origin != "release" || activated.ActivatedBy != "bootstrap-admin" ||
+		activated.ActivatedCredentialID == nil || *activated.ActivatedCredentialID == "" ||
+		activated.RequestID == "" || activated.ActivatedAt.IsZero() ||
+		activated.DataSchemaIdentity != publishedRelease.DataSchemaIdentity {
+		t.Fatalf("activated Snapshot = %#v, release = %#v", activated, publishedRelease)
+	}
+	activePath := "/api/admin/core/v1alpha1/modules/crm.leads/active"
+	activeResponse := assertIntegrationStatus(
+		t, client, http.MethodGet, baseURL+activePath,
+		testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	var active integrationActiveSnapshot
+	if err := json.Unmarshal(activeResponse.Body, &active); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(active, activated) {
+		t.Fatalf("active Snapshot = %#v, want %#v", active, activated)
+	}
+	replayedActivationResponse := assertIntegrationStatus(
+		t, client, http.MethodPost, baseURL+activatePath,
+		testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	var replayedActivation integrationActiveSnapshot
+	if err := json.Unmarshal(replayedActivationResponse.Body, &replayedActivation); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(replayedActivation, activated) ||
+		replayedActivationResponse.Header.Get("ETag") != `"release-epoch-2"` {
+		t.Fatalf("replayed activation = %#v, want %#v", replayedActivation, activated)
+	}
+	activeArtifact := assertIntegrationStatus(
+		t, client, http.MethodGet,
+		baseURL+"/api/core/v1alpha1/modules/crm.leads/openapi.json",
+		"", "", "", http.StatusOK, nil,
+	)
+	var activeOpenAPI map[string]any
+	if err := json.Unmarshal(activeArtifact.Body, &activeOpenAPI); err != nil {
+		t.Fatal(err)
+	}
+	if activeOpenAPI["x-panvara-revision"] != publishedRelease.CandidateRevision ||
+		bytes.Equal(activeArtifact.Body, prePublishArtifact.Body) {
+		t.Fatalf("active OpenAPI did not switch to Candidate: %#v", activeOpenAPI)
+	}
+	postActivationRecord := assertIntegrationStatus(
+		t, client, http.MethodGet, itemPath, testIntegrationAdminToken, "", "", http.StatusOK, nil,
+	)
+	if !bytes.Equal(postActivationRecord.Body, prePublishRecord.Body) ||
+		postActivationRecord.Header.Get("ETag") != prePublishRecord.Header.Get("ETag") {
+		t.Fatal("compatible Activate changed or hid the existing Record")
+	}
+
 	servicePrincipal := createIntegrationServicePrincipal(
 		t, client, baseURL, testIntegrationAdminToken, "Server smoke worker",
 	)
@@ -776,9 +863,20 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 			baseURL+"/api/core/v1alpha1/modules/crm.leads/openapi.json",
 			"", "", "", http.StatusOK, nil,
 		)
-		if !bytes.Equal(restartedArtifact.Body, prePublishArtifact.Body) ||
-			restartedArtifact.Header.Get("ETag") != prePublishArtifact.Header.Get("ETag") {
+		if !bytes.Equal(restartedArtifact.Body, activeArtifact.Body) ||
+			restartedArtifact.Header.Get("ETag") != activeArtifact.Header.Get("ETag") {
 			t.Fatalf("active OpenAPI changed after release restart %d", restart)
+		}
+		restartedActiveResponse := assertIntegrationStatus(
+			t, client, http.MethodGet, baseURL+activePath,
+			testIntegrationAdminToken, "", "", http.StatusOK, nil,
+		)
+		var restartedActive integrationActiveSnapshot
+		if err := json.Unmarshal(restartedActiveResponse.Body, &restartedActive); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(restartedActive, activated) {
+			t.Fatalf("active Snapshot changed after restart %d: got %#v want %#v", restart, restartedActive, activated)
 		}
 		restartedReleaseResponse := assertIntegrationStatus(
 			t, client, http.MethodGet, baseURL+releasePath,
@@ -846,9 +944,9 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 		}
 	}
 
-	// A changed Source compiles to a new immutable revision namespace. The old
-	// record is invisible and model-declared unique values are revision-local;
-	// returning to the original Source makes the original record visible again.
+	// Once an active pointer exists, a changed local Source may register another
+	// immutable bootstrap Revision but cannot replace the authoritative active
+	// Release, Runtime Revision, epoch, or retained Record namespace.
 	source, err := os.ReadFile(config.moduleSource)
 	if err != nil {
 		t.Fatalf("read integration module source: %v", err)
@@ -866,33 +964,32 @@ func TestServerProfileHTTPPersistenceLifecycle(t *testing.T) {
 	changedConfig.moduleSource = changedPath
 	changedApplication, changedServer, changedBaseURL := startIntegrationServer(t, ctx, changedConfig)
 	changedRegistry := assertIntegrationRevisionRegistry(
-		t, client, changedBaseURL, testIntegrationAdminToken, "crm.leads", changedApplication.revision, 3,
+		t, client, changedBaseURL, testIntegrationAdminToken, "crm.leads", runtimeRevision, 3,
 	)
 	if integrationDataSchemaFingerprint(changedRegistry.Metadata, 1) != integrationDataSchemaFingerprint(initialRegistry.Metadata, 1) {
 		t.Fatal("semantic version-only revision changed DataSchemaFingerprint")
 	}
+	if changedApplication.revision != publishedRelease.CandidateRevision || changedApplication.epoch != 2 {
+		t.Fatalf("changed local Source replaced active Runtime: revision=%q epoch=%d", changedApplication.revision, changedApplication.epoch)
+	}
 	changedItemPath := changedBaseURL + "/api/admin/v1alpha1/crm.leads/lead/" + lead.ID
 	assertIntegrationStatus(
-		t, client, http.MethodGet, changedItemPath, testIntegrationAdminToken, "", "", http.StatusNotFound, nil,
+		t, client, http.MethodGet, changedItemPath, testIntegrationAdminToken, "", "", http.StatusOK, nil,
 	)
-	changedOrganizationResponse := assertIntegrationStatus(
+	assertIntegrationStatus(
 		t, client, http.MethodPost,
 		changedBaseURL+"/api/admin/v1alpha1/crm.leads/organization",
-		testIntegrationAdminToken, `{"name":"Analytical Engines"}`, "", http.StatusCreated, nil,
+		testIntegrationAdminToken, `{"name":"Analytical Engines"}`, "", http.StatusConflict, nil,
 	)
-	changedOrganization := decodeIntegrationRecord(t, changedOrganizationResponse.Body)
 	changedLeadBody := fmt.Sprintf(
 		`{"organization":%q,"email":"ada@example.com","stage":"new"}`,
-		changedOrganization.ID,
+		organization.ID,
 	)
-	changedLeadResponse := assertIntegrationStatus(
+	assertIntegrationStatus(
 		t, client, http.MethodPost,
 		changedBaseURL+"/api/public/v1alpha1/crm.leads/lead",
-		"", changedLeadBody, "", http.StatusCreated, nil,
+		"", changedLeadBody, "", http.StatusConflict, nil,
 	)
-	if changedLead := decodeIntegrationRecord(t, changedLeadResponse.Body); changedLead.ID == lead.ID {
-		t.Fatalf("changed revision unexpectedly reused generated lead ID %q", changedLead.ID)
-	}
 	stopIntegrationServer(t, changedServer, changedApplication)
 
 	application, server, baseURL = startIntegrationServer(t, ctx, config)

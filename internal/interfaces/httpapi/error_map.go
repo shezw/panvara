@@ -93,6 +93,10 @@ func (handler *Handler) writeApplicationError(writer http.ResponseWriter, reques
 		writeError(writer, request, http.StatusConflict, "stale_plan", "module release plan is stale", nil)
 	case errors.Is(err, releaseapp.ErrNotPublishable):
 		writeError(writer, request, http.StatusUnprocessableEntity, "not_publishable", "module release plan is not publishable", nil)
+	case errors.Is(err, releaseapp.ErrNotActivatable):
+		writeError(writer, request, http.StatusUnprocessableEntity, "not_activatable", "module release cannot be activated by this runtime", nil)
+	case errors.Is(err, releaseapp.ErrActivationConflict):
+		writeError(writer, request, http.StatusConflict, "activation_conflict", "module release no longer matches the active runtime", nil)
 	case errors.Is(err, releaseapp.ErrCorrupt), errors.Is(err, releaseapp.ErrUnavailable):
 		writeError(writer, request, http.StatusServiceUnavailable, "release_unavailable", "module release authority is unavailable", nil)
 	case errors.Is(err, context.DeadlineExceeded):

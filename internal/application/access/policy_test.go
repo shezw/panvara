@@ -114,8 +114,10 @@ func TestPolicyAllowsAdminOnlyFromAuthoritativeExactGrant(t *testing.T) {
 	reader := &fakeGrantReader{active: true, grant: true, grantScope: scope}
 	policy := mustPolicy(t, reader)
 
-	if err := policy.Authorize(context.Background(), execution, OperationDraftPlan); err != nil {
-		t.Fatal(err)
+	for _, operation := range []Operation{OperationDraftPlan, OperationReleaseActivate, OperationReleaseGetActive} {
+		if err := policy.Authorize(context.Background(), execution, operation); err != nil {
+			t.Fatalf("Authorize(%q) error = %v", operation, err)
+		}
 	}
 	if reader.lastPrincipalID != "owner-1" ||
 		reader.lastRole != RoleProjectOwner ||
@@ -267,6 +269,8 @@ func TestPolicyPublicSurfaceRejectsRevisionAndDraftOperations(t *testing.T) {
 		OperationDraftGetPlan,
 		OperationReleasePublish,
 		OperationReleaseGet,
+		OperationReleaseActivate,
+		OperationReleaseGetActive,
 	}
 	for _, operation := range operations {
 		if err := policy.Authorize(context.Background(), execution, operation); !errors.Is(err, ErrForbidden) {

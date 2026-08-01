@@ -80,31 +80,35 @@ type AccessAdministration interface {
 // Public identity is explicit; admin identity is resolved dynamically from a
 // persisted bootstrap or service credential on every request.
 type Config struct {
-	Project              project.Context
-	Scope                project.Scope
-	PublicActor          actor.Context
-	Module               Module
-	Records              RecordService
-	Revisions            RevisionRegistryService
-	Drafts               DraftWorkflowService
-	Releases             ReleasePublisherService
-	AdminAuth            AdminAuth
-	AccessAdministration AccessAdministration
+	Project                 project.Context
+	Scope                   project.Scope
+	PublicActor             actor.Context
+	Module                  Module
+	RecordNamespaceRevision string
+	Records                 RecordService
+	Revisions               RevisionRegistryService
+	Drafts                  DraftWorkflowService
+	Releases                ReleasePublisherService
+	Activations             ReleaseActivationService
+	AdminAuth               AdminAuth
+	AccessAdministration    AccessAdministration
 }
 
 // Handler exposes generated schema and record APIs for one compiled module.
 type Handler struct {
-	project              project.Context
-	executionScope       project.Scope
-	publicActor          actor.Context
-	module               Module
-	records              RecordService
-	revisions            RevisionRegistryService
-	drafts               DraftWorkflowService
-	releases             ReleasePublisherService
-	accessAdministration AccessAdministration
-	resources            map[string]resourcePolicy
-	router               http.Handler
+	project                 project.Context
+	executionScope          project.Scope
+	publicActor             actor.Context
+	module                  Module
+	recordNamespaceRevision string
+	records                 RecordService
+	revisions               RevisionRegistryService
+	drafts                  DraftWorkflowService
+	releases                ReleasePublisherService
+	activations             ReleaseActivationService
+	accessAdministration    AccessAdministration
+	resources               map[string]resourcePolicy
+	router                  http.Handler
 }
 
 type resourcePolicy struct {
@@ -127,6 +131,13 @@ func New(config Config) (*Handler, error) {
 	if config.Module == nil {
 		return nil, fmt.Errorf("http API module is nil")
 	}
+	recordNamespace := config.RecordNamespaceRevision
+	if recordNamespace == "" {
+		recordNamespace = config.Module.RevisionHash()
+	}
+	if !domainmodule.ValidContentHash(recordNamespace) {
+		return nil, fmt.Errorf("http API Record namespace revision is invalid")
+	}
 	if config.Records == nil {
 		return nil, fmt.Errorf("http API record service is nil")
 	}
@@ -140,8 +151,9 @@ func New(config Config) (*Handler, error) {
 	handler := &Handler{
 		project: config.Project, executionScope: config.Scope,
 		publicActor: config.PublicActor,
-		module:      config.Module, records: config.Records, revisions: config.Revisions, drafts: config.Drafts,
-		releases:             config.Releases,
+		module:      config.Module, recordNamespaceRevision: recordNamespace,
+		records: config.Records, revisions: config.Revisions, drafts: config.Drafts,
+		releases: config.Releases, activations: config.Activations,
 		accessAdministration: config.AccessAdministration,
 		resources:            makeResourcePolicies(config.Module.Descriptor()),
 	}
@@ -165,6 +177,9 @@ func New(config Config) (*Handler, error) {
 	}
 	if config.Releases != nil {
 		handler.registerReleaseRoutes(mux, config.AdminAuth)
+	}
+	if config.Activations != nil {
+		handler.registerActivationRoutes(mux, config.AdminAuth)
 	}
 	handler.registerAccessRoutes(mux, config.AdminAuth)
 	mux.HandleFunc("/", handler.handleNotFound)
@@ -227,7 +242,7 @@ func (handler *Handler) operationAllowed(resourceName string, surface record.Sur
 
 func (handler *Handler) scope(request *http.Request) (record.Scope, error) {
 	return record.NewScope(
-		handler.project.ID(), request.PathValue("module"), request.PathValue("resource"), handler.module.RevisionHash(),
+		handler.project.ID(), request.PathValue("module"), request.PathValue("resource"), handler.recordNamespaceRevision,
 	)
 }
 

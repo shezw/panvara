@@ -207,6 +207,50 @@ func TestCompiledModuleValidatorAuthorizesEveryDeclaredOperation(t *testing.T) {
 	}
 }
 
+func TestCompiledModuleValidatorUsesExplicitRecordNamespace(t *testing.T) {
+	t.Parallel()
+	module := testCompiledModule(t)
+	namespace := "sha256:" + strings.Repeat("a", 64)
+	validator, err := NewCompiledModuleValidatorForNamespace(module, namespace)
+	if err != nil {
+		t.Fatalf("NewCompiledModuleValidatorForNamespace() error = %v", err)
+	}
+	scope, err := NewScope(testScope(t, "lead").ProjectID, module.Name(), "lead", namespace)
+	if err != nil {
+		t.Fatalf("NewScope(namespace) error = %v", err)
+	}
+	if err := validator.AuthorizeOperation(context.Background(), OperationValidationInput{
+		Scope: scope, Surface: SurfaceAdmin, Operation: OperationList,
+	}); err != nil {
+		t.Fatalf("AuthorizeOperation(namespace) error = %v", err)
+	}
+	if _, err := validator.ValidateList(context.Background(), ListValidationInput{
+		Scope: scope, Surface: SurfaceAdmin,
+	}); err != nil {
+		t.Fatalf("ValidateList(namespace) error = %v", err)
+	}
+	targetID := "01981234-5678-7abc-8def-0123456789ac"
+	if _, err := validator.Validate(context.Background(), ValidationInput{
+		Scope: scope, Surface: SurfacePublic, Mutation: MutationCreate,
+		Data: json.RawMessage(
+			`{"name":"Ada","email":"ada@example.com","owner":"` + targetID + `"}`,
+		),
+	}); err != nil {
+		t.Fatalf("Validate(namespace) error = %v", err)
+	}
+	if err := validator.AuthorizeOperation(context.Background(), OperationValidationInput{
+		Scope: testModuleScope(t, module, "lead"), Surface: SurfaceAdmin, Operation: OperationList,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("AuthorizeOperation(runtime revision) error = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := NewCompiledModuleValidatorForNamespace(module, "invalid"); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("NewCompiledModuleValidatorForNamespace(invalid) error = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := NewCompiledModuleValidatorForNamespace(nil, namespace); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("NewCompiledModuleValidatorForNamespace(nil) error = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func testCompiledModule(t *testing.T) *appmodule.CompiledModule {
 	t.Helper()
 	emailMaxLength := 320

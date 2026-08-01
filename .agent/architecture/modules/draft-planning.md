@@ -24,7 +24,7 @@ Draft Planning 为人或模型提供一个短反馈环：先把仍可能有错�
 
 开始前只需要区分五个词：
 
-- **当前运行 Revision**：当前 Server 进程实际提供 API 的模型，从 OpenAPI 读取。alpha.3b 没有 Active Revision 或活动指针。
+- **当前运行 Revision**：当前 Server 进程实际提供 API 的模型，从 OpenAPI 或 P0-02b Active Snapshot 读取；它不等于 Registry 中最新登记项。
 - **Baseline Revision**：创建 Draft 时由调用者明确固定的比较起点，创建后不会随 Server 或 Registry 改变。
 - **Draft Version**：内部 generation 的 HTTP 表达；Source 每次实质覆盖后递增，也是 Draft 元数据强 ETag 的数字值。它不是 Module Version 或 Candidate Revision。
 - **Validation**：绑定一个 Draft Version 和 Source Hash 的不可变检查事实；作者模型无效是正常结果，不是服务故障。
@@ -36,7 +36,7 @@ Draft Planning 为人或模型提供一个短反馈环：先把仍可能有错�
 
 alpha.3b 实现项目 owner 作用域内的 Draft 创建、读取与原始 Source 覆盖，持久化、可重放的 Validation 和 Plan，以及 ETag 并发保护和创建 Idempotency Key。Draft 可以保存空白、语法错误、未知字段或领域规则不完整的 UTF-8 Source，Validation 才负责给出结构化问题；原始 Source 不能包含 NUL（U+0000）。
 
-当前没有 Draft List/Delete/Rebase。Draft/Validation/Plan 接口本身不会 Publish；P0-02a 另提供显式 [Module Release 发布事实](release-publishing.md)，但仍没有 Activate、Rollback、数据迁移、active pointer/epoch、Outbox、Worker、运行时热切换或多节点收敛。
+当前没有 Draft List/Delete/Rebase。Draft/Validation/Plan 接口本身不会 Publish；P0-02a 另提供显式 [Module Release 发布事实](release-publishing.md)，P0-02b 只为数据身份完全不变的 compatible Release 提供 Activate。仍没有 Review/Migration 激活、Rollback、数据迁移、Outbox、Worker 或多节点收敛。
 
 ## 前置条件
 
@@ -296,12 +296,12 @@ Draft 是工作副本，不是可运行 Revision。保存只检查 Content-Type�
 - Draft Source 最多 1 MiB；没有 List、Delete、Rebase、配额或保留清理策略。
 - Plan Format 1 不启发式识别 rename，也不执行或排队迁移。
 - Candidate 不进入 Registry，不能被 Record Runtime 使用。
-- Draft Workflow 没有自动 Publish；P0-02a 只有独立显式 Publish Facts，没有 Activate、Rollback、active pointer/epoch、Outbox、Worker、热切换或多节点收敛。
+- Draft Workflow 没有自动 Publish；P0-02a/P0-02b 只有独立显式 Publish 与窄 compatible Activate，没有 Review/Migration 激活、Rollback、Outbox、Worker 或多节点收敛。
 
 ## 兼容与升级
 
 Draft、Validation 和 Plan 分别携带 Draft Version、Source Hash、Validation/Plan Format 与 Candidate 身份；客户端不能只凭 Distribution 版本或时间戳判断它们可重放。格式算法变化必须新增 format version，不能重解释旧 Hash。
 
-alpha.3b 不改变当前 Record namespace，也不修改 alpha.3a Registry 的不可变约束。P0-02a Publish 只能引用这里产生的不可变事实，并把 Candidate 与 Release 追加到权威存储；它不能把现有 Plan 重新解释为已激活或已迁移。未来 Activate/Migration 仍需独立完成原子切换、恢复与回滚协议。
+alpha.3b 不改变当前 Record namespace，也不修改 alpha.3a Registry 的不可变约束。P0-02a Publish 只能引用这里产生的不可变事实，并把 Candidate 与 Release 追加到权威存储；它不能把现有 Plan 重新解释为已激活或已迁移。P0-02b 只允许数据身份完全不变的显式 Activate；Migration 与 Rollback 仍需独立完成执行、验证和恢复协议。
 
 架构决策见 [ADR-0003](../adr/0003-draft-validation-change-plan.md)。

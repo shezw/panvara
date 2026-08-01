@@ -24,7 +24,7 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 - 单进程可以自然演进为 Server + Manager + Worker，而不重写领域规则。
 - 全球化原语从第一天进入模型，不等业务数据固化后再补。
 
-固定验证场景为 `crm-leads`。alpha.2 覆盖声明、编译、CRUD、Manager UI Schema 与 PostgreSQL；alpha.3a/3b 补充 Registry、Draft、Validation 与 Plan；P0-01a/P0-01b 补充默认 Environment、Access Kernel 与 project-local Credential/Grant 管理；P0-02a 补充不可变 Publish Facts。受控邮件事件、完整身份/权限、真正多 Environment 事实与 Activate/Rollback 仍属于后续范围。Account 不作为动态 Resource。
+固定验证场景为 `crm-leads`。alpha.2 覆盖声明、编译、CRUD、Manager UI Schema 与 PostgreSQL；alpha.3a/3b 补充 Registry、Draft、Validation 与 Plan；P0-01a/P0-01b 补充默认 Environment、Access Kernel 与 project-local Credential/Grant 管理；P0-02a 补充不可变 Publish Facts；P0-02b 增加数据身份完全不变时的单进程 compatible Activate。受控邮件事件、完整身份/权限、真正多 Environment 事实、迁移激活与 Rollback 仍属于后续范围。Account 不作为动态 Resource。
 
 ## 2. 版本路线
 
@@ -35,6 +35,7 @@ Core v0.1 的任务不是做一个缩小版“万能平台”，而是用一条�
 | alpha.3a 开发切片 | 可追加 Data Schema Identities、不可变 bootstrap Revision Registry、owner 只读查询与 Source 下载 | 重启幂等、首次 Source 保留、父/子事实拒绝改写、读取可复验；Distribution 仍为 alpha.2 |
 | alpha.3b 开发切片 | 版本化 Draft、raw Source Replace、Validation、Change Plan、创建幂等与 ETag 并发保护 | invalid → replace → valid → plan 可复现，Candidate/Runtime/Record 均不改变；Distribution 仍为 alpha.2 |
 | P0-02a runnable slice | 由有效 Plan 发布 Candidate Revision 与 environment-scoped Module Release；专用幂等、事务内再授权和成功安全审计 | 首次/重放/重启返回同一 Release；Candidate 入 Registry，Runtime/Record 不变；没有 Activate/Migration |
+| P0-02b runnable slice | compatible Release 的 active Snapshot、单调 epoch、Runtime/Record Namespace 分离与重启恢复 | 只有数据身份完全不变时切换；Record 保持可见；Review/Migration、Rollback 与多节点收敛失败关闭或尚不可用 |
 | P0-01a 开发切片 | 持久化 Project、单默认 Environment、Principal/`project.owner` Grant，以及 Record/Revision/Draft 的 Application Access Kernel | 默认 Scope 重启稳定，撤销 Grant 后 fail closed 且不会被重启恢复；完整 P0-01 与多 Environment 数据隔离仍未完成 |
 | P0-01b runnable slice | digest-only bootstrap/API Credential、Service Principal、Owner Grant API、终态、last-owner 与最小安全审计 | issue → verify → revoke；401/403/503；restart 不复活 Credential/Grant；完整 P0-01 与 P0-05 仍未完成 |
 | v0.1.0-alpha.3 | Draft/Validate/Plan/Publish/Activate/Rollback、迁移计划、审计、Outbox、本地 Worker、Email Capability | 发布失败可恢复，活动 Revision 可回滚，副作用可追踪 |

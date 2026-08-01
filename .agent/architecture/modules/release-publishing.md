@@ -18,18 +18,18 @@
 
 Module Release 把一个已经 Validate、已经生成 Change Plan 的候选模型登记为不可变发布事实。它回答“哪个 Project/Environment、哪个计划、哪个 Candidate、由谁在什么时候发布”，并允许客户端安全重试。
 
-它不回答“线上正在运行哪个版本”。当前 Server 仍使用启动配置中的模型，Publish 不激活、不迁移 Record，也不热切换 Runtime。
+它不回答“线上正在运行哪个版本”。Publish 不激活、不迁移 Record，也不热切换 Runtime；当前版本必须从 Active Snapshot 或 OpenAPI 读取。
 
 ## 当前状态
 
-当前为 **P0-02a runnable slice**：
+当前 Publish 为 **P0-02a runnable slice**，另有 P0-02b 的窄 compatible Activate：
 
 - 可以用一个 `plan_id` 发布当前、有效、可复验的 Draft 计划。
 - Candidate Revision 会幂等进入 Revision Registry。
 - Module Release、发布专用幂等绑定与成功安全审计在同一 PostgreSQL 事务提交。
 - 可以按 Release ID 读取发布事实。
 - `compatible`、`review_required`、`migration_required` 可以发布；`unsupported` 被拒绝。
-- 没有 Activate、Rollback、Migration Run、active pointer、epoch、Outbox、Worker 或多节点收敛。
+- 数据身份完全不变的 compatible Release 可显式 Activate，并持久化 active pointer/epoch；没有 Review/Migration 激活、Rollback、Migration Run、Outbox、Worker 或多节点收敛。
 
 ::: danger Published 不等于 Activated
 响应中的 `published=true` 只表示不可变发布事实已经写入。请同时检查 `activated=false`、`records_migrated=false`、`runtime_changed=false` 和 `activation_supported=false`。
@@ -133,11 +133,11 @@ POST Body 必须是且只能是 `{"plan_id":"sha256:..."}`。字段按原始字�
 
 ### 为什么发布后接口仍是旧模型？
 
-因为 P0-02a 只记录事实，没有 Activate。当前 Runtime 在启动时由 `PANVARA_MODULE_SOURCE` 选择；Publish 不改配置，也不热加载。
+因为 Publish 只记录事实。只有随后调用 compatible Activate 才会切换 Runtime；active pointer 存在后，`PANVARA_MODULE_SOURCE` 仍用于启动登记，但不会覆盖活动版本。
 
 ### `migration_required` 为什么还能发布？
 
-发布是在确认一个稳定候选和计划，激活才会影响运行。保存 `migration_required` 事实可以让后续 Migration Run 引用它；当前 `activation_supported=false`，所以不能上线。
+发布是在确认一个稳定候选和计划，激活才会影响运行。保存 `migration_required` 事实可以让后续 Migration Run 引用它；当前窄 Activate 会拒绝该结果，所以不能上线。
 
 ### 为什么同一 Plan 换 Key 还是原 Release？
 
@@ -157,9 +157,9 @@ stale 检查决定一个尚未发布的 Plan 能否首次发布，不会撤销�
 
 ## 当前限制
 
-- 只有 POST Publish 与 GET Detail，没有 List、Activate、Rollback 或 Delete。
+- 只有 POST Publish、GET Detail、compatible Activate 与 GET Active，没有 List、Rollback 或 Delete。
 - 没有数据迁移执行；`migration_required` 只是一项事实。
-- 没有活动版本、Snapshot、epoch 或分布式节点收敛。
+- 有单进程 active Snapshot、epoch 与重启恢复；没有多节点通知、ACK 或自动收敛。
 - 只有固定 `project.owner` 可发布，没有发布审批角色或四眼原则。
 - Release 已绑定 Environment，但 Draft、Revision、Record 仍主要是 project-scoped，未实现真正多 Environment 数据隔离。
 - 发布专用幂等和安全审计不是 P0-05 通用框架。

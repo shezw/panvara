@@ -149,6 +149,8 @@ func allOperations() []Operation {
 		OperationDraftGetPlan,
 		OperationReleasePublish,
 		OperationReleaseGet,
+		OperationReleaseActivate,
+		OperationReleaseGetActive,
 		OperationPrincipalList,
 		OperationPrincipalCreate,
 		OperationPrincipalDisable,
@@ -180,6 +182,13 @@ func TestNewMutationContextRequiresAdminMutationOperation(t *testing.T) {
 	if _, err := NewMutationContext(invocation, OperationReleaseGet); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("read operation error = %v, want ErrInvalid", err)
 	}
+	activation, err := NewMutationContext(invocation, OperationReleaseActivate)
+	if err != nil || activation.Operation() != OperationReleaseActivate {
+		t.Fatalf("activation MutationContext = %#v, %v", activation, err)
+	}
+	if _, err := NewMutationContext(invocation, OperationReleaseGetActive); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("active read operation error = %v, want ErrInvalid", err)
+	}
 	publicExecution, err := NewPublicExecution(scope, testAnonymous(t, testProjectID))
 	if err != nil {
 		t.Fatal(err)
@@ -190,6 +199,9 @@ func TestNewMutationContextRequiresAdminMutationOperation(t *testing.T) {
 	}
 	if _, err := NewMutationContext(publicInvocation, OperationReleasePublish); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("public mutation error = %v, want ErrInvalid", err)
+	}
+	if _, err := NewMutationContext(publicInvocation, OperationReleaseActivate); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("public activation mutation error = %v, want ErrInvalid", err)
 	}
 }
 

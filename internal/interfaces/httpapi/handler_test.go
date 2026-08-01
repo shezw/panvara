@@ -197,6 +197,32 @@ func TestPublicCreateUsesAnonymousProjectIdentity(t *testing.T) {
 	}
 }
 
+func TestRecordRequestsUseExplicitNamespaceInsteadOfRuntimeRevision(t *testing.T) {
+	t.Parallel()
+	const namespace = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	service := &fakeRecordService{create: func(
+		_ context.Context,
+		scope record.Scope,
+		_ record.Surface,
+		_ json.RawMessage,
+	) (record.Record, error) {
+		if scope.RevisionHash != namespace || scope.RevisionHash == testRevision {
+			t.Fatalf("Record scope revision = %q, want namespace %q", scope.RevisionHash, namespace)
+		}
+		return makeTestRecord(t, scope, 1), nil
+	}}
+	handler := newTestHandlerWithModuleAndNamespace(t, fakeModule{}, namespace, service)
+	request := httptest.NewRequest(
+		http.MethodPost, "/api/public/v1alpha1/crm/leads", strings.NewReader(`{"name":"Ada"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status/body = %d %q", response.Code, response.Body.String())
+	}
+}
+
 func TestAdminCRUDContract(t *testing.T) {
 	service := &fakeRecordService{}
 	handler := newTestHandler(t, service)
@@ -482,6 +508,15 @@ func newTestHandler(t *testing.T, records RecordService) *Handler {
 }
 
 func newTestHandlerWithModule(t *testing.T, module Module, records RecordService) *Handler {
+	return newTestHandlerWithModuleAndNamespace(t, module, "", records)
+}
+
+func newTestHandlerWithModuleAndNamespace(
+	t *testing.T,
+	module Module,
+	namespace string,
+	records RecordService,
+) *Handler {
 	t.Helper()
 	projectContext, err := project.NewContext(testProjectID, "crm", "en-US", "UTC", "USD")
 	if err != nil {
@@ -495,7 +530,8 @@ func newTestHandlerWithModule(t *testing.T, module Module, records RecordService
 	auth := newTestAdminAuth(t, scope)
 	handler, err := New(Config{
 		Project: projectContext, Scope: scope,
-		PublicActor: publicActor, Module: module, Records: records, AdminAuth: auth,
+		PublicActor: publicActor, Module: module,
+		RecordNamespaceRevision: namespace, Records: records, AdminAuth: auth,
 		AccessAdministration: &fakeAccessAdministration{},
 	})
 	if err != nil {

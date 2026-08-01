@@ -135,6 +135,7 @@ func (mutation MutationContext) RequestID() string { return mutation.invocation.
 func mutationOperation(operation Operation) bool {
 	switch operation {
 	case OperationReleasePublish,
+		OperationReleaseActivate,
 		OperationPrincipalCreate,
 		OperationPrincipalDisable,
 		OperationCredentialIssue,

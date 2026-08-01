@@ -30,7 +30,10 @@ func normalizeSnapshotError(action string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	for _, stable := range []error{ErrInvalid, ErrNotFound, ErrStale, ErrNotPublishable, ErrCorrupt, ErrUnavailable} {
+	for _, stable := range []error{
+		ErrInvalid, ErrNotFound, ErrStale, ErrNotPublishable,
+		ErrNotActivatable, ErrActivationConflict, ErrCorrupt, ErrUnavailable,
+	} {
 		if errors.Is(err, stable) {
 			return fmt.Errorf("%s: %w", action, err)
 		}
@@ -55,7 +58,8 @@ func normalizeStoreError(action string, err error) error {
 		return err
 	}
 	for _, stable := range []error{
-		ErrInvalid, ErrNotFound, ErrStale, ErrNotPublishable, ErrIdempotencyConflict, ErrCorrupt, ErrUnavailable,
+		ErrInvalid, ErrNotFound, ErrStale, ErrNotPublishable, ErrIdempotencyConflict,
+		ErrNotActivatable, ErrActivationConflict, ErrCorrupt, ErrUnavailable,
 		access.ErrUnauthenticated, access.ErrForbidden, access.ErrScopeInactive,
 	} {
 		if errors.Is(err, stable) {

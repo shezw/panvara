@@ -27,6 +27,10 @@ var (
 	ErrNotPublishable = errors.New("module release plan is not publishable")
 	// ErrIdempotencyConflict reports reuse of a key for another publish intent.
 	ErrIdempotencyConflict = errors.New("module release idempotency conflict")
+	// ErrNotActivatable reports a published Release that cannot safely become active.
+	ErrNotActivatable = errors.New("module release is not activatable")
+	// ErrActivationConflict reports a stale active baseline or prohibited reactivation.
+	ErrActivationConflict = errors.New("module release activation conflict")
 	// ErrCorrupt reports persisted facts that fail identity or chain verification.
 	ErrCorrupt = errors.New("module release storage is corrupt")
 	// ErrUnavailable reports an inability to read or atomically persist release facts.

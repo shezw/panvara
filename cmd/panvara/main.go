@@ -184,7 +184,10 @@ func executeWithFactories(
 	}
 	fmt.Fprintf(stdout, "panvara %s profile=%s address=%s\n", info.Distribution, definition.Name, server.Addr())
 	if application != nil {
-		fmt.Fprintf(stdout, "module=%s revision=%s\n", application.module, application.revision)
+		fmt.Fprintf(
+			stdout, "module=%s revision=%s epoch=%d\n",
+			application.module, application.revision, application.epoch,
+		)
 	}
 
 	var runErr error

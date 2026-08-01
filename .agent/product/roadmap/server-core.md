@@ -17,7 +17,7 @@
 ::: danger 当前不是 Server Core 完成
 当前代码只达到 **runnable-slice（可运行纵向切片）**：它证明了单 Project、单 AppModule 下的严格声明编译、固定 Revision JSONB CRUD、Registry、Draft → Validate → Plan，以及 P0-01a/P0-01b 的默认 Environment、Credential-backed Access Kernel 与 project-local 访问管理可以贯通。
 
-完整 P0-01 仍未完成；当前没有 Account/ExternalIdentity/Session/ProjectMembership、动态 Role/Policy、RecordOwner、真正多 Environment 事实，也没有 Migration/Provider 用例授权。P0-05 的通用 Audit/Idempotency/Outbox 仍未完成；P0-01b 只有访问管理最小安全审计，P0-02a 只有 Release 专用幂等。Publish Facts 已存在，但 Activate、Rollback、数据迁移、Worker、Provider Runtime、活动版本恢复与多节点收敛仍不存在。任何状态页都不得把当前阶段标为“Server 开发完成”。
+完整 P0-01 仍未完成；当前没有 Account/ExternalIdentity/Session/ProjectMembership、动态 Role/Policy、RecordOwner、真正多 Environment 事实，也没有 Migration/Provider 用例授权。P0-05 的通用 Audit/Idempotency/Outbox 仍未完成；P0-01b 只有访问管理最小安全审计，P0-02a 只有 Release 专用幂等。P0-02b 已有“数据身份完全不变”条件下的单进程 compatible Activate、active pointer、epoch 与重启恢复，但没有 Review/Migration 激活、Rollback、数据升级、Worker、Provider Runtime 或多节点收敛。任何状态页都不得把当前阶段标为“Server 开发完成”。
 :::
 
 本页定义 Server Core 的能力边界、成熟度术语、核心模型、分阶段待办和验收门禁。它是计划与完成口径，不会因为文档中列出了某项能力就自动表示该能力已经实现。
@@ -26,38 +26,43 @@
 
 ## 1. 当前真实基线
 
-当前 Server 的启动与变更准备是两条彼此隔离的链路：
+当前 Server 以持久化 active Snapshot 连接启动恢复与窄 compatible 变更链路：
 
 ```mermaid
 flowchart LR
     Source["启动配置中的单个 Source"] --> Compile["严格解码与编译"]
     Compile --> Registry["登记 bootstrap Revision"]
-    Compile --> Runtime["固定启动 Runtime"]
+    Registry --> Bootstrap["首次环境 bootstrap"]
+    Bootstrap --> Active
     Scope["0004/0005: Project + default Environment<br/>Principal + Credential + Grant + marker"] --> Kernel["Credential-backed Access Kernel"]
+    Active["0007: active Snapshot + epoch"] --> Runtime["请求固定的原子 Runtime"]
     Runtime --> Kernel
     Kernel --> CRUD["PostgreSQL flex Record CRUD"]
     Kernel --> RegistryRead["Revision: 3 read use cases"]
     Kernel --> DraftUseCases["Draft: 8 use cases"]
-    Kernel --> ReleaseUseCases["Release: Publish + Get"]
+    Kernel --> ReleaseUseCases["Release: Publish / Get / Activate / GetActive"]
     Kernel --> AccessAdmin["Access administration: 9 operations"]
 
     Candidate["候选 raw Source"] --> Draft["Draft + generation"]
     Draft --> Validate["不可变 Validation"]
     Validate --> Plan["不可变 Change Plan"]
     Plan --> Publish["P0-02a: immutable Module Release"]
-    Publish --> PublishStop["未激活 / 未迁移 / Runtime 未变"]
+    Publish --> Activate["P0-02b: compatible + identical data identity"]
+    Activate --> Active
+    Activate --> Blocked["review / migration / rollback：阻断"]
 ```
 
 真实代码边界包括：
 
-- `cmd/panvara/server_runtime.go` 只装配一个由启动配置定义并与数据库核对的 Project、一个持久化默认 Environment、一个编译后的 AppModule、一个 PostgreSQL Pool 和一个 HTTP Router。
+- `cmd/panvara/server_runtime.go` 只装配一个由启动配置定义并与数据库核对的 Project、一个持久化默认 Environment、一个 PostgreSQL Pool 和一个由 active Snapshot 选择的 AppModule Runtime。
 - `db/migrations/0001_flex_record.sql` 只建立 Record、Unique 和 Reference 数据结构。
 - `db/migrations/0002_module_revision_registry.sql` 建立不可变 bootstrap Revision 事实库，但没有发布或活动状态。
 - `db/migrations/0003_module_draft_workflow.sql` 建立 Draft、Validation 和 Plan，但明确不执行迁移。
 - `db/migrations/0004_project_environment_access.sql` 追加 Project、Environment、Principal 与固定 `project.owner` Grant；它不向 `0001`–`0003` 的事实表增加 `environment_id`。
 - `db/migrations/0005_project_access_administration.sql` 追加 Service Principal/API Credential、permanent marker、Grant lifecycle 与最小 append-only security audit。
 - `db/migrations/0006_module_publish_facts.sql` 追加 environment-scoped、append-only Module Release 与发布专用幂等绑定，并扩展受控 Revision publish provenance。
-- `internal/application/access` 以 Credential-backed `Execution` 和持久化 Grant 授权 Record 5、Revision 3、Draft 8、Release 2 与访问管理 9 个 Operation；Record 随后继续执行 AppModule Operation Policy。
+- `db/migrations/0007_compatible_release_activation.sql` 追加 Project Release Snapshot、Module Binding 与单调 Environment active pointer；Snapshot 区分 Runtime Revision 和 Record Namespace Revision。
+- `internal/application/access` 以 Credential-backed `Execution` 和持久化 Grant 授权 Record 5、Revision 3、Draft 8、Release Publish/Get/Activate/GetActive 与访问管理 9 个 Operation；Record 随后继续执行 AppModule Operation Policy。
 - Access Kernel 只接受 active 的默认 Environment。它阻断非默认 Environment，但不构成多 Environment 事实隔离。
 - `internal/application/appmodule/manager_schema.go` 只生成前端可消费的 JSON 描述，不是 Manager 应用。
 
@@ -119,9 +124,9 @@ Manager 不能成为所有后端缺口的容器。每种能力必须只有一个
 | AppModule 声明 | `Descriptor`、`Resource`、`Field`、`Constraint`、`Access`、`ManagerView`、模块依赖 | v1alpha1 子集已实现 | 协议版本转换、稳定字段身份、角色/Owner 策略、受控 Action/Event |
 | 编译制品 | `CanonicalIR`、`ModuleRevision`、`DataSchemaIdentity`、`SourceIdentity`、OpenAPI、Manager Schema | bootstrap Revision 已实现 | 每种身份独立版本化、制品可复验、历史只追加 |
 | 变更准备 | `Draft`、`DraftValidation`、`CandidateIdentity`、`ChangePlan` | Create/Get/Replace/Validate/Plan 已实现 | List/Delete/Rebase、配额、保留策略；只有显式 P0-02a Publish 可以消费 Plan |
-| 发布 | `PublishedRevision`、`ModuleRelease`、`ProjectReleaseSnapshot`、`ActiveRelease`、`ReleaseEpoch`、`RollbackEligibility`、`RollbackRecord` | P0-02a 已有 environment-scoped ModuleRelease Publish/Get；无 active 状态 | Activate 原子；回滚资格显式；Rollback 不删历史；重启恢复 active |
+| 发布 | `PublishedRevision`、`ModuleRelease`、`ProjectReleaseSnapshot`、`ActiveRelease`、`ReleaseEpoch`、`RollbackEligibility`、`RollbackRecord` | P0-02a Publish/Get 与 P0-02b 窄 compatible Activate/GetActive 已实现；无 Rollback/Migration 激活 | 扩展 Review/Migration 激活；回滚资格显式；Rollback 不删历史 |
 | 迁移 | `MigrationSpecification`、`MigrationRun`、`MigrationStep`、`Checkpoint`、`VerificationResult`、`DataRecoveryPlan` | 只有不可执行 Plan | 幂等、可恢复、保留 Record ID、重建约束、写入 fence、校验后才能 Activate |
-| Runtime | `RuntimeSnapshot`、`ModuleBinding`、`RequestExecutionContext` | 当前进程固定启动 Revision | 请求/Job/Event 全程固定 Snapshot/Epoch，不在处理中切换版本 |
+| Runtime | `RuntimeSnapshot`、`ModuleBinding`、`RequestExecutionContext` | 单进程 HTTP 请求已固定不可变 Handler Snapshot/epoch；重启从 active pointer 恢复 | Job/Event 固定、数据库与进程收敛观测、多节点 prepared/ACK |
 | Record | `RecordScope`、`Record`、`RecordVersion`、`RecordOwner`、`MutationProvenance`、`RetentionPolicy`、`UniqueValue`、`Reference` | 基础 CRUD 已实现 | Actor/Owner 策略、业务幂等、历史/恢复、批量事务、稳定查询契约 |
 | 审计 | `AuditEvent`、`SecurityOperationAttempt`、`AuditTarget`、`AuditOutcome` | P0-01b 有访问 mutation/denial 最小安全审计；通用审计缺失 | 跨业务只追加查询/保留；成功 mutation 同事务；失败降级/告警与 P0-05 原语 |
 | 幂等 | `IdempotencyRecord`、`RequestIdentity`、`IntentHash` | 仅 Create Draft 有专用 Key | 通用写入同 Key/同意图重放，同 Key/异意图冲突，结果可恢复 |
@@ -192,7 +197,7 @@ P0 是进入 `feature-complete` 的必要条件，优先级高于完整 Manager 
 
 - [ ] **P0-02：Publish/Activate/Rollback 状态机**
   - [x] **P0-02a：不可变 Publish Facts。** 一个 `plan_id` 先经短事务解析已发布事实；未命中才定位并复验当前 Draft/Validation/Plan/Source，Candidate Revision、environment-scoped Module Release、专用幂等绑定与 `release.publish` 成功安全审计在首次发布事务提交。首次 201；Draft stale 或重启后，同 Key/同意图及同 Plan/新 Key 仍返回原事实，同 Key/异意图在 Plan 查找前冲突；Publish/Get 均经 Access Kernel。响应明确 `published=true`、`activated=false`、`records_migrated=false`、`runtime_changed=false`、`activation_supported=false`。证据见 [ADR-0006](../adr/0006-immutable-module-release-publish-facts.md)、[发布指南](../modules/release-publishing.md)与[用户验收](../getting-started/draft-publish-acceptance.md)。
-  - [ ] **P0-02b：Activate 与 Runtime 恢复。** Project Release Snapshot、Environment active pointer、单调 epoch、原子切换和重启恢复；必须在数据兼容或 Migration 已验证后才能执行。
+  - [x] **P0-02b：窄 compatible Activate 与 Runtime 恢复 runnable slice。** Migration `0007` 持久化 Project Release Snapshot、Module Binding、Environment active pointer 与单调 epoch；只有 `compatible`、active baseline 未变化且 Candidate/Record Namespace 的 Data Schema format/fingerprint 完全相同才可激活。每个请求固定一个不可变完整 Handler Snapshot，Record Namespace 在版本切换后保持稳定，重启从数据库恢复 active Revision；并发 CAS 只允许一个 epoch 胜出。`review_required`、`migration_required`、数据身份变化和历史 Release 重激活全部失败关闭。证据见 [ADR-0007](../adr/0007-compatible-release-activation.md)。
   - [ ] **P0-02c：Rollback/Recovery。** 显式资格、策略与恢复窗口；Rollback 追加新事实，不删除 Release 历史。
   - 交付：Published Revision、Module Release、Project Release Snapshot、Environment 作用域的 active pointer、单调 epoch、Rollback Eligibility/Record；首次 Publish 只能消费精确且未 stale 的有效 Validation/Plan，已提交事实的幂等重放不重新解释当前 Draft。每次 Release 必须在 Activate 前固化 `pointer-only`、`forward-fix`、`reverse-migration` 或 `backup-restore` 恢复策略及适用窗口。
   - 验收门禁：Publish 不改变 Runtime；Activate 在一个事务内完整切换或完整失败；重启从数据库恢复 active Snapshot；同一 Data Schema 或经证明向后兼容时才允许 pointer-only 回滚；存在新版本写入或破坏性迁移时，旧 Runtime 未验证可读就必须阻断指针回切并执行显式恢复计划；并发 Activate 只有一个 epoch 胜出。
@@ -204,6 +209,8 @@ P0 是进入 `feature-complete` 的必要条件，优先级高于完整 Manager 
   - 不能误判完成：Change Plan 能识别 `requires_migration`、生成 SQL 文本、复制几条示例数据，或只在空数据库成功，都不算迁移能力完成。
 
 - [ ] **P0-04：Runtime Snapshot 固定与重启恢复**
+  - [x] **P0-04a：单进程 HTTP 请求固定。** `modelruntime` 在请求入口只加载一次不可变 Handler Snapshot；Install 单调且同 epoch 幂等，冲突使 readiness 失败。Server 重启从 PostgreSQL active pointer 重新编译并核对全部 Revision 制品。
+  - [ ] **P0-04b：完整执行与故障收敛。** Job/Event 固定、数据库短暂不可用期间的 last-known-good 策略、active epoch 观测与多节点状态仍未实现。
   - 交付：每个请求、Job、Event 在开始时固定 Project Release Snapshot/Epoch；Server 不再由可覆盖的本地 Source 隐式决定活动模型。
   - 验收门禁：Activate 与并发请求交错时，单次执行只能观察一个 epoch；重启、短暂数据库不可用和 last-known-good 恢复均有 E2E；落后或无法加载 active 制品的实例 readiness 失败。
   - 不能误判完成：OpenAPI 中有 Revision、进程内全局变量保存当前 Hash，或重启时重新读取原文件，都不能算活动版本恢复。
@@ -320,7 +327,7 @@ flowchart LR
 
 | 阶段 | 部署形态 | 进入条件 | 退出门禁 |
 | --- | --- | --- | --- |
-| A：当前切片 | Server + PostgreSQL；固定 Source；无 Worker | 仅用于架构与纵向验收 | 不得对外标 feature-complete |
+| A：当前切片 | Server + PostgreSQL；单模块 active Snapshot；无 Worker | 仅用于架构与纵向验收 | 不得对外标 feature-complete |
 | B：完整模块化单体 | Server 内含 Core、Release、Migration、Audit、Outbox 和进程内 Worker；Manager Web 可独立构建或托管，但经同源 URL/反向代理暴露给浏览器 | P0 开发 | P0 全部门禁通过；单节点重启/回滚/副作用可恢复 |
 | C：Worker 分离 | Server 写业务事实与 Outbox；独立 Worker 通过 PostgreSQL claim | 长任务、外部副作用或独立扩缩需要 | 多 Worker 竞争、滚动升级、Lease/Retry/DLQ、积压恢复通过 |
 | D：专用安全/负载边界 | Payment Webhook、Media 等独立服务；Manager BFF 仍只做代理/Session | 安全、资源、团队所有权或发布节奏已有证据 | 数据所有权清晰，无跨服务同步事务，有故障隔离和退出方案 |
@@ -374,17 +381,17 @@ Manager Web 的独立部署不是领域拆分。可选 Manager BFF 只能负责 
 | Profile 枚举中出现 `manager`、`worker` 或 `distributed` | 名称和计划存在 | 没有运行装配、失败语义和 E2E |
 | 能生成 Manager UI Schema | 前端描述制品可生成 | 没有 Manager 应用，也没有补齐服务端规则 |
 | Registry 保存了 Revision | 历史编译事实可复验 | 不能据此推出 Release、active pointer 或 Runtime 切换 |
-| Module Release 显示 `published=true` | Candidate 与发布意图已形成不可变事实 | `activated=false`、没有 Migration/epoch，Runtime 仍未切换 |
+| Module Release 显示 `published=true` | Candidate 与发布意图已形成不可变事实 | 必须再调用 Activate；当前只有数据身份不变的 compatible Release 可切换 |
 | Change Plan 能识别风险 | 变化解释算法可运行 | 没有数据复制、约束重建、checkpoint 和恢复 |
 | Service Credential 可签发、轮换和撤销 | project-local 机器身份与固定 Owner Grant runnable slice | 没有 Account/ExternalIdentity/Session/ProjectMembership、动态 Role/Policy、RecordOwner 与多 Environment 事实；P0-01b 不等于完整 IAM |
 | 数据库有 Environment 表且 `Execution` 带 Environment | 默认 Environment 身份稳定，非默认 Scope 被拒绝 | 既有业务事实没有 `environment_id`，不能宣称多 Environment 数据隔离 |
 | `requires.capabilities` 进入 IR | 声明和 Hash 稳定 | 没有 Provider 解析、Binding、Credential、健康和调用 |
 | 创建了 Outbox 表 | 有保存消息的结构 | 没有同事务写入、claim、Lease、重试、去重和恢复 |
 | 单元测试和 Mock 全绿 | 局部规则内部一致 | 没有真实 PostgreSQL、Worker、Provider 和故障语义证据 |
-| 两个 Server 实例都能启动 | 进程可并存 | 没有 active epoch、节点准备/ACK、落后节点摘流量和收敛 |
+| 两个 Server 实例都能启动 | 进程可并存并可各自恢复数据库 active epoch | 没有节点准备/ACK、主动通知、落后节点摘流量和收敛 |
 | Manager 页面能执行某个流程 | UI 可以发请求和保存临时状态 | 权威状态机、权限和事务仍可能缺失或只存在浏览器中 |
 | `/readyz` 能 Ping 数据库 | 当前连接短时可用 | 不能证明 active 制品、Capability、Worker 或节点版本已经就绪 |
-| 覆盖 Source 后重启成功 | 新文件能被编译 | 这不是升级、迁移、激活或回滚，旧数据可能进入不可见 namespace |
+| 覆盖 Source 后重启成功 | 新文件能被登记为 Revision | active pointer 已存在时本地 Source 不会隐式上线；真正升级仍必须 Publish → Activate 或 Migration |
 
 路线图状态更新必须附带具体证据：代码入口、数据库迁移、Application/HTTP 契约、真实依赖测试、故障测试、文档验收和最后一次通过时间。缺少其中与该能力相关的任一项时，只能保留在较低成熟度，不能用“基本完成”“大致可用”等模糊措辞替代。
 

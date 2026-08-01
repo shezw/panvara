@@ -27,11 +27,11 @@ import (
 
 var _ Validator = (*CompiledModuleValidator)(nil)
 
-// CompiledModuleValidator binds one immutable compiled module revision to the
-// generic record application service. Alpha.2 intentionally uses this static,
-// in-process catalog; module-revision persistence is a later milestone.
+// CompiledModuleValidator binds one immutable compiled module revision and one
+// explicit Record persistence namespace to the generic record service.
 type CompiledModuleValidator struct {
-	module *appmodule.CompiledModule
+	module    *appmodule.CompiledModule
+	namespace string
 }
 
 // AuthorizeOperation checks the resource operation allowlist for the exact
@@ -53,8 +53,8 @@ func (validator *CompiledModuleValidator) AuthorizeOperation(
 		return fmt.Errorf("%w: invalid record policy context", ErrInvalidArgument)
 	}
 	if input.Scope.ModuleName != validator.module.Name() ||
-		input.Scope.RevisionHash != validator.module.RevisionHash() {
-		return fmt.Errorf("%w: compiled module revision does not match record scope", ErrInvalidArgument)
+		input.Scope.RevisionHash != validator.namespace {
+		return fmt.Errorf("%w: compiled module or record namespace does not match record scope", ErrInvalidArgument)
 	}
 	domainOperation, ok := compiledOperation(input.Operation)
 	if !ok {
@@ -85,8 +85,8 @@ func (validator *CompiledModuleValidator) ValidateList(
 		return nil, err
 	}
 	if input.Scope.ModuleName != validator.module.Name() ||
-		input.Scope.RevisionHash != validator.module.RevisionHash() {
-		return nil, fmt.Errorf("%w: compiled module revision does not match list scope", ErrInvalidArgument)
+		input.Scope.RevisionHash != validator.namespace {
+		return nil, fmt.Errorf("%w: compiled module or record namespace does not match list scope", ErrInvalidArgument)
 	}
 	if len(input.Filters) > MaxListFilters {
 		return nil, fmt.Errorf("%w: too many list filters", ErrInvalidArgument)
@@ -127,12 +127,30 @@ func (validator *CompiledModuleValidator) ValidateList(
 	return result, nil
 }
 
-// NewCompiledModuleValidator constructs the alpha.2 single-module adapter.
+// NewCompiledModuleValidator constructs the legacy adapter whose runtime
+// revision is also its Record persistence namespace.
 func NewCompiledModuleValidator(module *appmodule.CompiledModule) (*CompiledModuleValidator, error) {
+	if module == nil {
+		return NewCompiledModuleValidatorForNamespace(nil, "")
+	}
+	return NewCompiledModuleValidatorForNamespace(module, module.RevisionHash())
+}
+
+// NewCompiledModuleValidatorForNamespace binds runtime validation to an
+// explicit Record namespace. Compatible runtime revisions can therefore retain
+// their existing records without pretending that the namespace is the active
+// module revision.
+func NewCompiledModuleValidatorForNamespace(
+	module *appmodule.CompiledModule,
+	namespace string,
+) (*CompiledModuleValidator, error) {
 	if module == nil {
 		return nil, fmt.Errorf("%w: nil compiled module", ErrInvalidArgument)
 	}
-	return &CompiledModuleValidator{module: module}, nil
+	if !domain.ValidContentHash(namespace) {
+		return nil, fmt.Errorf("%w: invalid record namespace revision", ErrInvalidArgument)
+	}
+	return &CompiledModuleValidator{module: module, namespace: namespace}, nil
 }
 
 // Validate implements Validator with a two-stage, fail-closed policy:
@@ -151,8 +169,8 @@ func (validator *CompiledModuleValidator) Validate(
 		return ValidatedData{}, err
 	}
 	if input.Scope.ModuleName != validator.module.Name() ||
-		input.Scope.RevisionHash != validator.module.RevisionHash() {
-		return ValidatedData{}, fmt.Errorf("%w: compiled module revision does not match record scope", ErrInvalidArgument)
+		input.Scope.RevisionHash != validator.namespace {
+		return ValidatedData{}, fmt.Errorf("%w: compiled module or record namespace does not match record scope", ErrInvalidArgument)
 	}
 	surface, ok := compiledSurface(input.Surface)
 	if !ok {

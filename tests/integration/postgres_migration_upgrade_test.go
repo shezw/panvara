@@ -84,6 +84,9 @@ func TestPostgresMigrateUpgrades0001OnlyDatabaseWithoutChangingFlexData(t *testi
 	checksums["0004_project_environment_access.sql"] = embeddedMigrationChecksum(t, "0004_project_environment_access.sql")
 	checksums["0005_project_access_administration.sql"] = embeddedMigrationChecksum(t, "0005_project_access_administration.sql")
 	checksums["0006_module_publish_facts.sql"] = embeddedMigrationChecksum(t, "0006_module_publish_facts.sql")
+	checksums["0007_compatible_release_activation.sql"] = embeddedMigrationChecksum(
+		t, "0007_compatible_release_activation.sql",
+	)
 	assertMigrationLedger(t, ctx, pool, checksums)
 	assertFlexRowCounts(t, ctx, pool, 2, 2, 1)
 
@@ -202,6 +205,9 @@ func TestPostgresMigrateUpgrades0002RegistryWithoutChangingFacts(t *testing.T) {
 	checksums["0004_project_environment_access.sql"] = embeddedMigrationChecksum(t, "0004_project_environment_access.sql")
 	checksums["0005_project_access_administration.sql"] = embeddedMigrationChecksum(t, "0005_project_access_administration.sql")
 	checksums["0006_module_publish_facts.sql"] = embeddedMigrationChecksum(t, "0006_module_publish_facts.sql")
+	checksums["0007_compatible_release_activation.sql"] = embeddedMigrationChecksum(
+		t, "0007_compatible_release_activation.sql",
+	)
 	assertMigrationLedger(t, ctx, pool, checksums)
 	assertFlexRowCounts(t, ctx, pool, 2, 2, 1)
 
@@ -331,6 +337,9 @@ func TestPostgresMigrateUpgrades0003DraftFactsIntoPersistentAccessScope(t *testi
 	)
 	checksums["0006_module_publish_facts.sql"] = embeddedMigrationChecksum(
 		t, "0006_module_publish_facts.sql",
+	)
+	checksums["0007_compatible_release_activation.sql"] = embeddedMigrationChecksum(
+		t, "0007_compatible_release_activation.sql",
 	)
 	assertMigrationLedger(t, ctx, pool, checksums)
 
@@ -505,6 +514,9 @@ func TestPostgresMigrateUpgrades0004AccessFactsWithoutRestoringAuthority(t *test
 			)
 			checksums["0006_module_publish_facts.sql"] = embeddedMigrationChecksum(
 				t, "0006_module_publish_facts.sql",
+			)
+			checksums["0007_compatible_release_activation.sql"] = embeddedMigrationChecksum(
+				t, "0007_compatible_release_activation.sql",
 			)
 			assertMigrationLedger(t, ctx, pool, checksums)
 
@@ -797,6 +809,31 @@ func applyMigrationsThrough0005(
 		t.Fatal(err)
 	}
 	checksums["0005_project_access_administration.sql"] = checksum
+	return checksums
+}
+
+func applyMigrationsThrough0006(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+) map[string]string {
+	t.Helper()
+	checksums := applyMigrationsThrough0005(t, ctx, pool)
+	script, err := fs.ReadFile(migrations.Files(), "0006_module_publish_facts.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, string(script), pgx.QueryExecModeSimpleProtocol); err != nil {
+		t.Fatal(err)
+	}
+	checksum := migrationChecksum(script)
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO panvara_schema_migration (version, checksum) VALUES ($1, $2)`,
+		"0006_module_publish_facts.sql", checksum,
+	); err != nil {
+		t.Fatal(err)
+	}
+	checksums["0006_module_publish_facts.sql"] = checksum
 	return checksums
 }
 

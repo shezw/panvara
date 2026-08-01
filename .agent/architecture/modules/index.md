@@ -122,7 +122,7 @@ Lite 可以；Server 和 Record Runtime 不可以。
 
 ### 有 Registry 后还需要保存模块 Source 吗？
 
-Registry 会保存第一次登记的 Source，P0-02a 也能把有效 Candidate 发布为不可变事实；但当前没有 Activate、迁移或回滚流程。仍应把模型当作版本化源码维护，并在改变启动 Source 前备份数据库。
+Registry 会保存第一次登记的 Source，P0-02a 也能把有效 Candidate 发布为不可变事实。P0-02b 只允许数据身份完全不变的 compatible Release 激活；迁移与回滚仍不存在。仍应把模型当作版本化源码维护，并在首次激活前备份数据库。
 
 ### Validation 通过后是否可以直接上线？
 
@@ -130,7 +130,7 @@ Registry 会保存第一次登记的 Source，P0-02a 也能把有效 Candidate �
 
 ### Publish 成功后是否可以直接上线？
 
-不可以。P0-02a 会登记 Candidate Revision 和 Module Release，但响应明确为 `activated=false`、`runtime_changed=false`。当前运行 Revision 仍由启动配置决定。
+不可以直接上线。P0-02a 只登记 Candidate Revision 和 Module Release，Publish 响应仍为 `activated=false`、`runtime_changed=false`。只有数据身份完全不变的 compatible Release 可以再显式 Activate；其他结果失败关闭。
 
 ### Token 正确是否就拥有 Admin 权限？
 
@@ -141,7 +141,7 @@ Registry 会保存第一次登记的 Source，P0-02a 也能把有效 Candidate �
 - 文档站本身只描述当前仓库能力，不代表 Panvara 已进入稳定版本。
 - alpha.2 只有 Lite 和 Server 两种可运行 Profile。
 - alpha.3a Registry 只有启动登记和 owner 只读接口，没有发布或活动版本管理。
-- alpha.3b 只有 Draft、Validation 与 Change Plan；P0-02a 另有 Publish Facts，但仍没有 Draft UI、Activate、Rollback 或数据迁移执行。
+- alpha.3b 有 Draft、Validation、Change Plan 与 Publish Facts；P0-02b 增加了窄 compatible Activate，但仍没有 Draft UI、Review/Migration 激活、Rollback 或数据迁移执行。
 - P0-01b 只有 project-local Service Principal/API Credential 与固定 Owner Grant；没有 Account、ExternalIdentity、Session、ProjectMembership、动态 Role/Policy 或 RecordOwner。
 - Record、Revision 与 Draft 尚无 `environment_id`，只有默认 Environment 可以执行，未实现多 Environment 数据隔离。
 - 没有可视化 Manager、Provider Runtime、消息队列或分布式控制面。

@@ -105,7 +105,13 @@ CRM 示例要求组织名称和邮箱在同一模型版本中唯一。更换示�
 
 ## Publish 成功但 API 仍是旧模型
 
-这是 P0-02a 的正确行为。`published=true` 只表示 Candidate Revision 和 Module Release 已形成不可变事实；同一响应应显示 `activated=false`、`records_migrated=false`、`runtime_changed=false` 与 `activation_supported=false`。当前运行 Revision 仍从 OpenAPI 顶层 `x-panvara-revision` 读取。
+这是 P0-02a 的正确行为。`published=true` 只表示 Candidate Revision 和 Module Release 已形成不可变事实；同一响应应显示 `activated=false`、`records_migrated=false` 与 `runtime_changed=false`。当前运行 Revision 仍从 OpenAPI 顶层 `x-panvara-revision` 读取；只有数据身份不变的 compatible Release 再显式 Activate 后才会切换。
+
+## Activate 返回 409、422 或 503
+
+- `409 activation_conflict`：Baseline 已不是当前 Runtime、发生并发切换，或目标 Release 曾在历史 epoch 激活；重新读取 `/active` 后重新规划，不要强制改指针。
+- `422 not_activatable`：Release 需要复核、迁移，或 Candidate 数据身份与当前 Record Namespace 不同；当前版本没有绕过机制。
+- `503 release_unavailable`：持久事实、制品复验或进程内 Runtime 安装不可用；先摘除未就绪实例并核对数据库 active epoch。
 
 ## Publish 返回 409、422 或 503
 

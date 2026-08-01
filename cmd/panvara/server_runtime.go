@@ -32,6 +32,7 @@ import (
 	"github.com/shezw/panvara/internal/infrastructure/postgres"
 	"github.com/shezw/panvara/internal/interfaces/httpapi"
 	"github.com/shezw/panvara/internal/interfaces/httpserver"
+	"github.com/shezw/panvara/internal/runtime/modelruntime"
 )
 
 const maxModuleSourceBytes int64 = 1 << 20
@@ -41,6 +42,7 @@ type applicationRuntime struct {
 	handler  http.Handler
 	module   string
 	revision string
+	epoch    uint64
 	ready    httpserver.StatusSource
 	close    func()
 }
@@ -177,31 +179,75 @@ func buildServerApplication(ctx context.Context, config serverConfig) (*applicat
 	if err != nil {
 		return nil, err
 	}
-	store, err := postgres.NewStore(pool)
+	recordStore, err := postgres.NewStore(pool)
 	if err != nil {
 		return nil, err
 	}
-	validator, err := record.NewCompiledModuleValidator(module)
+	active, _, err := releaseStore.EnsureBootstrap(
+		ctx, executionScope, module.Name(), module.RevisionHash(), time.Now().UTC(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ensure bootstrap active Runtime Snapshot: %w", err)
+	}
+	activeRevision, err := revisionStore.Get(
+		ctx, projectContext.ID(), active.ModuleName(), active.RuntimeRevision(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load active Runtime Revision: %w", err)
+	}
+	var activations httpapi.ReleaseActivationService
+	modelRuntime, err := modelruntime.New(modelruntime.BuilderFunc(func(
+		buildContext context.Context,
+		activeModule *appmodule.CompiledModule,
+		recordNamespace string,
+	) (http.Handler, error) {
+		if err := buildContext.Err(); err != nil {
+			return nil, err
+		}
+		if activations == nil {
+			return nil, fmt.Errorf("release activation service is not composed")
+		}
+		validator, err := record.NewCompiledModuleValidatorForNamespace(activeModule, recordNamespace)
+		if err != nil {
+			return nil, err
+		}
+		records, err := record.NewDefaultService(recordStore, validator, authorizer)
+		if err != nil {
+			return nil, err
+		}
+		return httpapi.New(httpapi.Config{
+			Project: projectContext, Scope: executionScope,
+			PublicActor: publicActor, Module: activeModule,
+			RecordNamespaceRevision: recordNamespace, Records: records,
+			Revisions: revisions, Drafts: drafts, Releases: releases, Activations: activations,
+			AdminAuth: auth, AccessAdministration: accessAdministration,
+		})
+	}))
 	if err != nil {
 		return nil, err
 	}
-	records, err := record.NewDefaultService(store, validator, authorizer)
+	activator, err := releaseapp.NewDefaultActivator(
+		releaseStore, releaseStore, revisionStore, modelRuntime, authorizer, accessStore,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("construct module release activator: %w", err)
 	}
-	router, err := httpapi.New(httpapi.Config{
-		Project: projectContext, Scope: executionScope,
-		PublicActor: publicActor, Module: module, Records: records,
-		Revisions: revisions, Drafts: drafts, Releases: releases, AdminAuth: auth,
-		AccessAdministration: accessAdministration,
-	})
+	activations = activator
+	prepared, err := modelRuntime.Prepare(ctx, activeRevision, active.RecordNamespaceRevision())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("prepare active Runtime Snapshot: %w", err)
+	}
+	if err := modelRuntime.Install(active, prepared); err != nil {
+		return nil, fmt.Errorf("install active Runtime Snapshot: %w", err)
 	}
 	success = true
 	return &applicationRuntime{
-		handler: router, module: module.Name(), revision: module.RevisionHash(),
-		ready: &databaseReadiness{pool: pool, timeout: 500 * time.Millisecond}, close: pool.Close,
+		handler: modelRuntime, module: active.ModuleName(), revision: active.RuntimeRevision(), epoch: active.Epoch(),
+		ready: &runtimeReadiness{
+			database: &databaseReadiness{pool: pool, timeout: 500 * time.Millisecond},
+			runtime:  modelRuntime,
+		},
+		close: pool.Close,
 	}, nil
 }
 
@@ -220,6 +266,16 @@ func composeReleasePublisher(
 type databaseReadiness struct {
 	pool    *pgxpool.Pool
 	timeout time.Duration
+}
+
+type runtimeReadiness struct {
+	database httpserver.StatusSource
+	runtime  *modelruntime.Runtime
+}
+
+func (readiness *runtimeReadiness) Ready() bool {
+	return readiness != nil && readiness.database != nil && readiness.database.Ready() &&
+		readiness.runtime != nil && readiness.runtime.Ready()
 }
 
 func (readiness *databaseReadiness) Ready() bool {

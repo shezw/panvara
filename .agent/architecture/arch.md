@@ -184,7 +184,7 @@ Core 面向 Capability 编程，第三方厂商只是 Adapter。Provider 协议�
 
 ## 6. 分布式管理
 
-alpha.3a/3b 已建立 Registry 与 Draft/Validation/Plan；P0-01a/P0-01b 又增加默认 Environment Scope、Credential-backed Access Kernel 与 project-local 访问管理；P0-02a 增加不可变 Publish Facts。它们通过 Application Port 保留未来拆分边界，但不会为了当前中小开发者场景先增加独立服务。以下激活状态与分布式收敛仍是后续目标，不是当前能力：
+alpha.3a/3b 已建立 Registry 与 Draft/Validation/Plan；P0-01a/P0-01b 又增加默认 Environment Scope、Credential-backed Access Kernel 与 project-local 访问管理；P0-02a 增加不可变 Publish Facts；P0-02b 增加单进程 compatible Activate、active pointer/epoch 与重启恢复。它们通过 Application Port 保留未来拆分边界，但不会为了当前中小开发者场景先增加独立服务。以下完整分布式收敛仍是后续目标，不是当前能力：
 
 - 数据面：无状态 API 节点和可水平扩展 Worker；请求显式携带 ProjectContext。
 - 控制面：Manager 管理模型、配置、Provider 引用和发布；产出不可变 Revision。
@@ -194,7 +194,7 @@ alpha.3a/3b 已建立 Registry 与 Draft/Validation/Plan；P0-01a/P0-01b 又增�
 - Valkey：可丢失缓存、限流和短期协调；不是业务事实来源。
 - 对象存储：资产和大对象；数据库只保存元数据与引用。
 
-当前 Publish 先以短事务二次授权并解析已发布事实；未命中时，首次发布事务引用不可变 Validation/Plan、幂等登记 Revision，并写入 Module Release 与成功安全审计。两者都没有 Outbox。未来 Activate 流程再写入 active Snapshot/epoch 与 Outbox；Worker 分发激活提示，节点按哈希加载并上报状态。PostgreSQL Registry 与 Release 始终是制品/发布事实权威，但当前没有活动版本。消息丢失时节点轮询收敛仍是后续设计。
+当前 Publish 先以短事务二次授权并解析已发布事实；未命中时，首次发布事务引用不可变 Validation/Plan、幂等登记 Revision，并写入 Module Release 与成功安全审计。窄 compatible Activate 会在事务内复核授权与不可变事实，追加 active Snapshot 并推进 epoch；单进程随后原子安装完整 Handler，重启从 PostgreSQL 恢复。当前没有 Outbox、节点通知/ACK 或轮询收敛；这些仍是后续设计。
 
 每次发布生成不可变 ProjectReleaseSnapshot、单调 epoch 和 Module Hash Map。节点先下载、校验并 ACK prepared，控制面再原子提升 active epoch；请求、Job 和 Event 开始时固定 epoch，处理中不得切换。未追平目标 Project 的节点不得承接该 Project 流量；失败发布保持 last-known-good，不改变 active epoch。
 

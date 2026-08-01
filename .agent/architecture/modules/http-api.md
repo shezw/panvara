@@ -240,7 +240,13 @@ curl -fsS \
   -H "Authorization: Bearer $PANVARA_ADMIN_TOKEN"
 ```
 
-Publish 先在短事务中二次授权并解析已绑定 Key 或已发布 Plan；未命中时才重新核对当前 Draft generation、有效 Validation、非 stale Plan，并复编译精确 Source。首次成功后 Candidate Revision 与 Module Release 在同一数据库事务写入。响应必须同时返回 `published=true`、`activated=false`、`records_migrated=false`、`runtime_changed=false` 与 `activation_supported=false`。所有 Release 响应使用 `Cache-Control: private, no-store`。完整验收见 [Draft → Publish 完整验收](../getting-started/draft-publish-acceptance.md)。
+Publish 先在短事务中二次授权并解析已绑定 Key 或已发布 Plan；未命中时才重新核对当前 Draft generation、有效 Validation、非 stale Plan，并复编译精确 Source。首次成功后 Candidate Revision 与 Module Release 在同一数据库事务写入。响应必须同时返回 `published=true`、`activated=false`、`records_migrated=false` 与 `runtime_changed=false`；Publish 本身绝不切换 Runtime。所有 Release 响应使用 `Cache-Control: private, no-store`。完整验收见 [Draft → Publish 完整验收](../getting-started/draft-publish-acceptance.md)。
+
+### Compatible Activate 与 Active Snapshot
+
+`POST /api/admin/core/v1alpha1/modules/{module}/releases/{release}/activate` 只接受空 Body、无 Query 的 owner 请求。只有 `compatible`、Baseline 等于当前 Runtime 且 Candidate 与现有 Record Namespace 的 Data Schema format/fingerprint 完全相同时，事务才会追加 Snapshot、推进 epoch、审计成功并切换进程内完整 Handler。首次切换返回 201；当前 Release 重放返回 200。
+
+`GET /api/admin/core/v1alpha1/modules/{module}/active` 返回当前 `runtime_revision`、独立的 `record_namespace_revision`、Release、epoch 与激活来源。两条路由均返回 `private, no-store` 和 `ETag: "release-epoch-{epoch}"`。`review_required`、`migration_required`、数据身份变化、stale baseline 或历史 Release 重激活分别以 422/409 失败关闭。
 
 ## 验收
 
@@ -259,7 +265,9 @@ Publish 先在短事务中二次授权并解析已绑定 Key 或已发布 Plan�
 13. 无效 Validation 返回 2xx + `valid=false`；有效 Validation 与 Plan 重放保持同一 ID/Hash。
 14. Plan 后 OpenAPI Revision、Registry Candidate 与业务 Record 均不改变，全部执行 effects 为 false。
 15. Publish 首次返回 201；Draft stale 与进程重启后，同 Key 或同 Plan 新 Key 重放仍返回 200 和同一 Release；同 Key/异 Plan 优先返回 409。
-16. Publish 后 Candidate 可从 Registry 读取，但 OpenAPI Revision 与 Record 在发布前后及重启后保持不变。
+16. Publish 后 Candidate 可从 Registry 读取，但 OpenAPI Revision 与 Record 在 Publish 前后保持不变。
+17. 数据身份不变的 compatible Release 首次 Activate 返回 201、重放返回 200；OpenAPI 切换到 Candidate，Record Namespace 和已有 Record 不变，epoch 只推进一次。
+18. Server 重启从 active pointer 恢复 Candidate；配置中的新 bootstrap Source 只能登记 Revision，不能覆盖 active Snapshot。
 
 ## 常见问题
 
@@ -293,7 +301,7 @@ Validation 请求成功，作者 Source 没有通过。读取 `violations` 修�
 
 ### Plan 的 `compatible` 表示可以激活吗？
 
-不表示。Plan 只解释结构变化。P0-02a 可以把它发布成不可变事实，但 `activation_supported=false`；当前 Record namespace 仍按完整 Module Revision 隔离，也没有 Activate 或迁移执行。
+不表示。Plan 只解释结构变化。P0-02b 还要求 Candidate 与当前 Record Namespace 的 Data Schema format/fingerprint 完全相同；只有通过这项核对的 compatible Release 才能显式 Activate。
 
 ### `published=true` 表示线上已经切换吗？
 
@@ -307,8 +315,8 @@ Validation 请求成功，作者 Source 没有通过。读取 `violations` 修�
 - 没有 gRPC、GraphQL、批量 API 或流式响应。
 - Record Body 最大 256 KiB；Draft Source 最大 1 MiB；请求 Header 最大 1 MiB。
 - 写超时 30 秒，不适合长任务。
-- Registry 只有 owner 只读 API，没有 cursor、通用写入 API 或活动指针；Candidate 只由 Publish 用例登记。
-- Draft Planning 没有 List/Delete/Rebase；P0-02a 只有 Publish/Detail，没有 Activate/Rollback、数据迁移或活动指针。
+- Registry 只有 owner 只读 API，没有 cursor 或通用写入 API；Candidate 只由 Publish 用例登记。
+- Draft Planning 没有 List/Delete/Rebase；Release 只有 Publish/Detail、窄 compatible Activate/GetActive，没有 Review/Migration 激活、Rollback 或数据迁移。
 
 ## 兼容与升级
 
