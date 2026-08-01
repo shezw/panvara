@@ -129,4 +129,4 @@ curl -fsS \
 
 ## 当前限制
 
-示例没有登录、团队、备注、附件、搜索、通知、批量导入或网页 Manager；Public API 只能创建 Lead。修改模块 Source 会产生新的数据 Scope，不会自动升级本页创建的数据。
+示例没有登录、团队、备注、附件、搜索、通知、批量导入或网页 Manager；Public API 只能创建 Lead。Current Distribution 直接修改模块 Source 会产生新的数据 Scope，不会自动升级本页创建的数据；Source Preview 只有数据结构完全未变化的 compatible Activate 会保留原 Record 存储标识。

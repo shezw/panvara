@@ -121,7 +121,13 @@ make run-server
 - **数据影响：** 旧数据通常仍保留，但没有自动复制到新 Revision。不要覆盖唯一的旧 Source。
 
 ::: warning Source Preview
-Publish Facts 返回成功但 API 仍使用旧模型，是模型变更预览的正确结果。必须同时看到 `activated=false`、`records_migrated=false` 与 `runtime_changed=false`；当前 Runtime 仍以 OpenAPI 的 Revision 为准。
+Publish 返回成功但 API 仍使用旧模型，是模型变更预览的正确结果。必须同时看到 `activated=false`、`records_migrated=false` 与 `runtime_changed=false`。只有随后显式 Activate，且 Release 的数据结构完全未变化时，Runtime 才会切换。
+
+- `409 activation_conflict`：当前版本已变化、发生并发切换，或目标是历史 Release；重新读取 `/active` 并从当前版本开始。
+- `422 not_activatable`：变更需要复核、迁移或改变了数据结构；当前不能绕过。
+- `503 release_unavailable`：发布权威或本地 Runtime 状态不确定；停止该实例，重启后先读取 `/active`，不要盲目重复激活。
+
+Activate 成功后，恢复旧 Source 或重启不会回滚。当前只能依赖激活前验证过的数据库备份恢复。
 :::
 
 ## `make infra-down` 后数据仍然存在

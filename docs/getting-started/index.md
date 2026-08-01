@@ -43,7 +43,7 @@ curl --version
 ```sh
 git clone https://github.com/shezw/panvara.git
 cd panvara
-git switch --detach 38afe3e91e5a54c1a677b0acbe3a6a2a75668839
+git switch --detach cfea044bfee90b7b8d62de79e42d2503258d7781
 make doctor
 ```
 

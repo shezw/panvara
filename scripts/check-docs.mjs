@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
-const snapshotRevision = "38afe3e91e5a54c1a677b0acbe3a6a2a75668839";
+const snapshotRevision = "cfea044bfee90b7b8d62de79e42d2503258d7781";
 
 const requiredPages = [
   "docs/index.md",
@@ -245,6 +245,7 @@ requireFragments("docs/releases/status.md", [
   "Planned / Unavailable",
   "v0.1.0-alpha.2",
   "尚无对应 GitHub Release",
+  "Compatible Activate",
 ]);
 requireFragments("docs/guides/access-preview.md", [
   "Source Preview",
@@ -253,6 +254,16 @@ requireFragments("docs/guides/access-preview.md", [
 requireFragments("docs/guides/model-change-preview.md", [
   "Source Preview",
   "v0.1.0-alpha.2",
+  'ACTIVATE_URL="$RELEASES_URL/$RELEASE_ID/activate"',
+  ".data_schema_changed == false",
+  ".record_namespace_revision == $namespace",
+  "重启 Server**不会回退**",
+]);
+requireFragments("docs/reference/http-api.md", [
+  "GET /api/admin/core/v1alpha1/modules/{module}/active",
+  "POST /api/admin/core/v1alpha1/modules/{module}/releases/{release}/activate",
+  "activation_conflict",
+  "not_activatable",
 ]);
 
 if (failures.length > 0) {

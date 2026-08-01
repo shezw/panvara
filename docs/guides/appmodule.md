@@ -116,7 +116,7 @@ Source 最大 1 MiB。解析器会拒绝未知字段、重复 YAML/JSON Key、YA
 - 非空 `sortable` 当前会被拒绝；
 - `manager.list` 与 `manager.form` 只生成 JSON 描述，不会启动网页。
 
-完整示例见固定源码快照中的 [`examples/modules/crm-leads.yaml`](https://github.com/shezw/panvara/blob/38afe3e91e5a54c1a677b0acbe3a6a2a75668839/examples/modules/crm-leads.yaml)。
+完整示例见固定源码快照中的 [`examples/modules/crm-leads.yaml`](https://github.com/shezw/panvara/blob/cfea044bfee90b7b8d62de79e42d2503258d7781/examples/modules/crm-leads.yaml)。
 
 ## 验收与限制
 

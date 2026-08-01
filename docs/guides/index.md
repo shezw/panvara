@@ -18,7 +18,7 @@
 
 ## Current Distribution
 
-以下是二进制内建 Distribution 标识 **v0.1.0-alpha.2** 对应的公开使用能力。所有操作指南沿用[快速开始](/getting-started/)固定的源码快照 `38afe3e91e5a54c1a677b0acbe3a6a2a75668839`；同一快照中的 Preview 代码不会因此进入 Distribution 能力边界。
+以下是二进制内建 Distribution 标识 **v0.1.0-alpha.2** 对应的公开使用能力。所有操作指南沿用[快速开始](/getting-started/)固定的源码快照 `cfea044bfee90b7b8d62de79e42d2503258d7781`；同一快照中的 Preview 代码不会因此进入 Distribution 能力边界。
 
 | 我要做什么 | 指南 | 完成标志 |
 | --- | --- | --- |
@@ -35,6 +35,6 @@
 | 我要评估什么 | 指南 | 明确缺失 |
 | --- | --- | --- |
 | Service Credential 与固定 Owner Grant | [访问管理预览](./access-preview) | 登录、Session、动态角色、细粒度权限 |
-| 候选模型的登记、验证、计划和发布事实 | [模型变更预览](./model-change-preview) | Activate、Rollback、数据执行升级 |
+| 候选模型的验证、发布与 compatible Activate | [模型变更预览](./model-change-preview) | 需要复核/迁移的激活、Rollback、多 Server 同步 |
 
 完全不可用的能力只在[能力状态](/releases/status)中列出，不提供伪操作步骤。

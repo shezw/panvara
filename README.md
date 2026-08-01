@@ -16,7 +16,7 @@
 
 Panvara 是面向个人与中小开发团队的数据模型驱动全栈框架。你用一份严格的 YAML 或 JSON AppModule 声明资源、字段、约束与开放操作，Panvara 将它编译为可运行的 HTTP API、PostgreSQL Record 能力、OpenAPI 3.1 和 Manager UI Schema。
 
-当前二进制内建 Distribution 标识为 **v0.1.0-alpha.2**，但当前尚无对应 GitHub Release。本文固定到源码快照 `38afe3e91e5a54c1a677b0acbe3a6a2a75668839`，适合本地原型、学习和技术评估，暂不适合直接承载生产业务。
+当前二进制内建 Distribution 标识为 **v0.1.0-alpha.2**，但当前尚无对应 GitHub Release。本文固定到源码快照 `cfea044bfee90b7b8d62de79e42d2503258d7781`，适合本地原型、学习和技术评估，暂不适合直接承载生产业务。
 
 ## 你可以用它做什么
 
@@ -32,7 +32,7 @@ Panvara 是面向个人与中小开发团队的数据模型驱动全栈框架。
 ```sh
 git clone https://github.com/shezw/panvara.git
 cd panvara
-git switch --detach 38afe3e91e5a54c1a677b0acbe3a6a2a75668839
+git switch --detach cfea044bfee90b7b8d62de79e42d2503258d7781
 make doctor
 make build
 ./bin/panvara --version
@@ -59,7 +59,7 @@ curl -fsS http://127.0.0.1:8080/version
 - [版本、能力状态与兼容](docs/releases/status.md)
 - [参与贡献](docs/contributing/index.md)
 
-同一源码快照还包含隔离标注的 **Source Preview**；二进制中的 Distribution 版本字段不表示这些预览能力已经成熟或进入发行。公开文档会明确区分 **Current Distribution**、**Source Preview** 和尚不可用的 **Planned / Unavailable**。
+同一源码快照还包含隔离标注的 **Source Preview**，其中可以发布并显式激活“数据结构未变化”的 compatible 模型版本。它仍只适合单 Server、本地或可丢弃环境；二进制中的 Distribution 版本字段不表示这些预览能力已经成熟或进入发行。具体操作见[模型变更预览](docs/guides/model-change-preview.md)。
 
 本地维护文档：
 

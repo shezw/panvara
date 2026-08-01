@@ -54,7 +54,7 @@ Panvara 对 AppModule 的规范内容计算 Revision。任何进入规范模型�
 
 备份文件、AppModule Source、配置与 Revision 记录应一起保存；只保留其中一项不足以恢复。
 
-## 安全回到原模型
+## 安全回到原模型（Current Distribution）
 
 如果新 Source 不符合预期：
 
@@ -70,7 +70,9 @@ Panvara 对 AppModule 的规范内容计算 Revision。任何进入规范模型�
 ## Source Preview 的边界
 
 ::: warning Source Preview
-固定源码快照可以生成 Change Plan 和 Publish Facts，但仍没有 Activate、Rollback 或数据升级执行。发布事实不会切换 Runtime，也不会复制 Record，不能代替上述备份与恢复流程。
+固定源码快照 `cfea044bfee90b7b8d62de79e42d2503258d7781` 可以显式激活数据结构完全未变化的 compatible Release。激活只切换运行模型，并继续使用原来的 `record_namespace_revision`，所以已有 Record 仍然可见；任何数据结构变化都会被拒绝。
+
+Publish 仍不会自动上线。Activate 成功后，替换本地 Source 或重启 Server**不会回滚**，因为 Server 会从数据库恢复活动版本。当前没有 Rollback API；恢复只能依赖激活前已经验证过的数据库备份，并可能丢失备份之后的写入。
 :::
 
 ## 客户端兼容建议
@@ -84,4 +86,4 @@ Panvara 对 AppModule 的规范内容计算 Revision。任何进入规范模型�
 
 ## 生产边界
 
-当前没有零停机升级、自动备份恢复、数据转换、双写、流量切换、回滚编排或跨版本 SLA。需要这些能力的系统不应使用当前 Panvara Distribution 承载生产数据。
+Source Preview 只保证单 Server 内新请求切换到完整的新 Runtime Snapshot；当前没有多个 Server 的协调与自动收敛，也没有自动备份恢复、数据转换、双写、回滚编排或跨版本 SLA。需要这些能力的系统不应使用当前 Panvara Distribution 承载生产数据。

@@ -16,7 +16,7 @@
 
 当前二进制内建的 Distribution 标识是 **v0.1.0-alpha.2**（`/version` 返回 `0.1.0-alpha.2`），当前尚无对应 GitHub Release。本页描述能力边界，不是下载公告；该标识面向本地开发与技术评估，**不适合生产**。
 
-公开指南统一固定到源码快照 `38afe3e91e5a54c1a677b0acbe3a6a2a75668839`。Distribution 标识定义公开能力边界，不是源码提交边界；该快照编译出的二进制仍会报告 `0.1.0-alpha.2`，不能仅根据版本字段推断同一源码中的 Source Preview 已成熟或进入 Distribution。
+公开指南统一固定到源码快照 `cfea044bfee90b7b8d62de79e42d2503258d7781`。Distribution 标识定义公开能力边界，不是源码提交边界；该快照编译出的二进制仍会报告 `0.1.0-alpha.2`，不能仅根据版本字段推断同一源码中的 Source Preview 已成熟或进入 Distribution。
 
 ## 状态定义
 
@@ -42,13 +42,14 @@
 
 ## Source Preview
 
-这些能力仅针对固定提交 `38afe3e91e5a54c1a677b0acbe3a6a2a75668839`：
+这些能力仅针对固定提交 `cfea044bfee90b7b8d62de79e42d2503258d7781`：
 
 | 能力 | 当前源码事实 | 明确不是 |
 | --- | --- | --- |
-| Revision Registry | 查询不可变 Revision 与原始 Source | 活动版本管理 |
+| Revision Registry | 查询不可变 Revision 与原始 Source | 自动选择“最新版本” |
 | Draft / Validation / Plan | 保存候选、验证并解释变化 | 执行变化或上线许可 |
-| Publish Facts | 登记 Candidate 与不可变 Release 事实 | Activate、Rollback 或数据升级 |
+| Publish Facts | 登记 Candidate 与不可变 Release 事实；Publish 不自动上线 | 激活、回滚或数据升级的替代品 |
+| Compatible Activate | 查看当前活动版本，并显式激活数据结构未变化的 compatible Release | 需要复核/迁移的激活、Rollback 或多个 Server 同步 |
 | Principal / Credential / Owner Grant | 本地 Service Credential 与固定 Owner Grant | 账号登录或完整 IAM |
 
 只从[访问管理预览](/guides/access-preview)和[模型变更预览](/guides/model-change-preview)进入。
@@ -58,7 +59,7 @@
 | 能力 | 当前状态 |
 | --- | --- |
 | 可视化 Manager | 没有可登录或操作的管理网页 |
-| Activate / Rollback | 没有活动版本指针或切换流程 |
+| 需要复核或数据转换的 Activate / Rollback | 当前只允许数据结构完全未变化的 compatible Activate；没有回滚 |
 | 自动数据升级 | 没有 Record 转换、执行与验证器 |
 | 账号登录与外部身份 | 没有 Account、Session、MFA 或 Provider 登录 |
 | 支付 | 没有 Payment Provider Runtime |

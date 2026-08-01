@@ -15,16 +15,8 @@
 # 访问管理预览
 
 ::: warning Source Preview
-本页固定到源码提交 [`38afe3e91e5a54c1a677b0acbe3a6a2a75668839`](https://github.com/shezw/panvara/tree/38afe3e91e5a54c1a677b0acbe3a6a2a75668839)。它**不属于 v0.1.0-alpha.2 Distribution 能力边界，不适合生产**。当前只有 project-local Service Principal、一次性 API Credential 与固定 Owner Grant；缺少账号登录、External Identity、Session、项目成员、动态角色/策略、Record Owner、MFA、限流和完整多环境隔离。
+本页固定到源码提交 [`cfea044bfee90b7b8d62de79e42d2503258d7781`](https://github.com/shezw/panvara/tree/cfea044bfee90b7b8d62de79e42d2503258d7781)。它**不属于 v0.1.0-alpha.2 Distribution 能力边界，不适合生产**。当前只有 project-local Service Principal、一次性 API Credential 与固定 Owner Grant；缺少账号登录、External Identity、Session、项目成员、动态角色/策略、Record Owner、MFA、限流和完整多环境隔离。
 :::
-
-## 源码依据
-
-- [Application 访问管理用例](https://github.com/shezw/panvara/blob/38afe3e91e5a54c1a677b0acbe3a6a2a75668839/internal/application/access/administration.go)
-- [HTTP 访问管理路由](https://github.com/shezw/panvara/blob/38afe3e91e5a54c1a677b0acbe3a6a2a75668839/internal/interfaces/httpapi/access_handler.go)
-- [PostgreSQL 访问管理存储](https://github.com/shezw/panvara/blob/38afe3e91e5a54c1a677b0acbe3a6a2a75668839/internal/infrastructure/postgres/access_admin_store.go)
-
-这些链接是本页契约的固定证据；后续源码可能变化，不能把本页命令套用到任意分支。
 
 ## 准备固定源码
 
@@ -39,7 +31,7 @@ jq --version
 ```sh
 git clone https://github.com/shezw/panvara.git panvara-access-preview
 cd panvara-access-preview
-git switch --detach 38afe3e91e5a54c1a677b0acbe3a6a2a75668839
+git switch --detach cfea044bfee90b7b8d62de79e42d2503258d7781
 
 make doctor-server
 make local-init
