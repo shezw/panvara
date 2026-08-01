@@ -59,10 +59,10 @@ Panvara 面向想快速验证数据型应用的个人与中小开发团队。你
 - 运行 CRM Leads 示例，并验证 Server 重启后数据仍然存在；
 - 下载由当前模块生成的 OpenAPI 与 Manager UI Schema。
 
-源码仓库中另有明确隔离的模型变更与访问管理预览。它们不属于当前 Distribution 能力边界，入口位于[使用指南](/guides/)的 Source Preview 分区。
+源码仓库中另有明确隔离的模型变更与访问管理预览。其中可以发布并显式激活数据结构未变化的 compatible 模型版本。它们不属于当前 Distribution 能力边界，入口位于[使用指南](/guides/)的 Source Preview 分区。
 
 ::: danger Planned / Unavailable
-可视化 Manager、模型 Activate/Rollback、自动数据升级、账号登录、支付、后台 Worker 和分布式控制面目前不可用。
+可视化 Manager、需要复核或数据转换的模型激活、Rollback、自动数据升级、账号登录、支付、后台 Worker 和分布式控制面目前不可用。
 :::
 
 ## 生产使用边界

@@ -194,6 +194,10 @@ requireFragments("README.md", [
   "docs/releases/status.md",
   "docs/contributing/index.md",
 ]);
+requireFragments("docs/index.md", [
+  "compatible 模型版本",
+  "需要复核或数据转换的模型激活",
+]);
 
 requireFragments("CONTRIBUTING.md", [
   "docs/contributing/index.md",
